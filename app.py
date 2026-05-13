@@ -22,7 +22,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v1.2.0"
+APP_VERSION = "v1.2.1"
 
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
 if not os.path.exists(APPDATA_DIR):

@@ -1,8 +1,2 @@
-### What's New in v1.2.0 
-- Auto Login now works!
-    - Uses keyboard inputs to navigate Microsoft login screen and automatically pastes your code
-- tutorial screen updated
-- fixed infinite instances being able to run at once
-- fixed auto login tool tip
-- fixed save and apply bug
-- added delay setting for auto login, use longer delay if network is slower
+### What's New in v1.2.1 
+- Added a toast for Auto Login

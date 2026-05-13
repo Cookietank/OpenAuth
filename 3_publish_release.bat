@@ -12,11 +12,19 @@ echo [*] Updating app.py to v%VERSION%...
 python bump_version.py %VERSION%
 
 echo.
-echo [*] Opening Notepad for release notes...
+echo [*] Opening Notepad++ for release notes...
 echo ### What's New in v%VERSION% > release_notes.txt
 echo - Added new features >> release_notes.txt
 echo - Bug fixes >> release_notes.txt
-notepad release_notes.txt
+
+:: Force Notepad++ to open as a new instance so the script actually pauses!
+if exist "C:\Program Files\Notepad++\notepad++.exe" (
+    "C:\Program Files\Notepad++\notepad++.exe" -multiInst -nosession release_notes.txt
+) else if exist "C:\Program Files (x86)\Notepad++\notepad++.exe" (
+    "C:\Program Files (x86)\Notepad++\notepad++.exe" -multiInst -nosession release_notes.txt
+) else (
+    notepad release_notes.txt
+)
 
 echo.
 echo [*] Cleaning old builds...
@@ -29,7 +37,9 @@ echo [*] Compiling OpenAuth_v%VERSION%.exe...
 pyinstaller --noconsole --onefile --name "OpenAuth_v%VERSION%" --icon=plugins/icon.ico --add-data "plugins/*;plugins" --collect-all pyzbar --collect-all keyring --hidden-import PIL._tkinter_finder app.py
 
 echo.
-echo [*] Pushing source code to GitHub...
+echo [*] Syncing and Pushing source code to GitHub...
+:: Pull cloud changes first to prevent the 'rejected' error!
+git pull --rebase
 git add .
 git commit -m "Release v%VERSION%"
 git push

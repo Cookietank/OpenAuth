@@ -50,16 +50,36 @@ class AutoLoginPlugin(PluginBase):
         self.app.root.clipboard_append(text)
         self.app.root.update()
 
+    def show_toast(self, message, duration=2500):
+        """Creates a custom, non-blocking floating notification window."""
+        toast = tk.Toplevel(self.app.root)
+        toast.overrideredirect(True)
+        toast.attributes('-topmost', True)
+        toast.configure(bg="#2d2d2d", bd=1, relief=tk.SOLID)
+        
+        lbl = tk.Label(toast, text=message, fg="white", bg="#2d2d2d", font=("Helvetica", 10), padx=15, pady=10)
+        lbl.pack()
+        
+        self.app.root.update_idletasks()
+        
+        x = toast.winfo_screenwidth() - toast.winfo_width() - 20
+        y = toast.winfo_screenheight() - toast.winfo_height() - 60
+        toast.geometry(f"+{x}+{y}")
+        
+        self.app.root.after(duration, toast.destroy)
+
     def execute_automation(self):
         print("\n[AUTO-LOGIN] Sequence Initiated via Keystrokes!")
+        
+        # Fire the toast notification safely on the Tkinter main thread
+        self.app.root.after(0, self.show_toast, "Triggering Microsoft Auto Login")
+        
         threading.Thread(target=self._run_sequence, daemon=True).start()
 
     def _run_sequence(self):
         try:
-            # Dynamically fetch the delay setting (defaults to 0.8s)
             delay = float(self.app.config.get("hotkeys", {}).get("auto_login_delay", 0.8))
             
-            # Force release modifier keys so 'tab' doesn't become 'ctrl+tab'
             keyboard.release('ctrl')
             keyboard.release('alt')
             keyboard.release('shift')
@@ -69,7 +89,6 @@ class AutoLoginPlugin(PluginBase):
             time.sleep(0.1) 
             keyboard.send('enter')
             
-            # Wait for next screen to load based on user settings
             time.sleep(delay)
             
             print("[AUTO-LOGIN] Step 2: Tab -> Enter")
@@ -83,9 +102,10 @@ class AutoLoginPlugin(PluginBase):
                 self.app.root.after(0, self.copy_to_clipboard, code)
             else:
                 print("[AUTO-LOGIN] No code available to copy!")
+                # Show an error toast if it failed
+                self.app.root.after(0, self.show_toast, "Error: No Primary Code available!")
                 return
                 
-            # Wait for the code input screen to load and RDP clipboard to sync
             time.sleep(delay)
             
             print("[AUTO-LOGIN] Step 3: Paste -> Enter")

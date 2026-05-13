@@ -15,6 +15,10 @@ if "%msg%"=="" (
 )
 
 echo.
+echo [*] Syncing with GitHub cloud...
+:: Pull changes first so we don't get rejected
+git pull --rebase
+
 echo [*] Staging and Committing...
 git add .
 git commit -m "%msg%"
