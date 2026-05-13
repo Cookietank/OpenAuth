@@ -1,0 +1,16 @@
+# Python environment
+__pycache__/
+*.pyc
+venv/
+env/
+
+# PyInstaller build files
+build/
+dist/
+*.spec
+
+# User Config & Secrets (NEVER upload these!)
+app_config.json
+tailscale_config.json
+yubikey_config.json
+*.log
