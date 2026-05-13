@@ -7,7 +7,8 @@ import json
 import os
 import secrets
 import subprocess
-import webbrowser  # Added for clickable links
+import webbrowser
+import ctypes
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
@@ -21,7 +22,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v1.1.0"  # Version tracker
+APP_VERSION = "v1.2.0"
 
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
 if not os.path.exists(APPDATA_DIR):
@@ -39,7 +40,7 @@ AVAILABLE_PLUGINS = {
     "Local Broadcaster": LocalBroadcasterPlugin,
     "Screen QR Scanner": ScreenQRScannerPlugin,
     "Virtual YubiKey": VirtualYubiKeyPlugin,
-    "Auto-Login OCR": AutoLoginPlugin,
+    "Auto-Login": AutoLoginPlugin,
     "Tailscale Phone Sync": TailscaleSyncPlugin
 }
 
@@ -48,7 +49,7 @@ PLUGIN_DESCRIPTIONS = {
     "Local Broadcaster": "Broadcasts codes over local UDP for external app integration.",
     "Screen QR Scanner": "Provisions accounts by grabbing and scanning QR codes directly from your screen.",
     "Virtual YubiKey": "Provides a global keyboard shortcut to instantly copy (or paste) your primary code.",
-    "Auto-Login OCR": "Uses computer vision to automatically navigate and click Microsoft login screens.\n(Note: Currently Experimental / Not Working).",
+    "Auto-Login": "Uses an automated keystroke macro to instantly navigate Microsoft login screens and inject your code.",
     "Tailscale Phone Sync": "Hosts a secure API to send codes instantly to your phone via Tailscale VPN."
 }
 
@@ -103,13 +104,14 @@ class DesktopAuthenticator:
                 "Local Broadcaster": True,
                 "Screen QR Scanner": True,
                 "Virtual YubiKey": True,
-                "Auto-Login OCR": False,
+                "Auto-Login": False,
                 "Tailscale Phone Sync": True
             },
             "hotkeys": {
                 "Virtual YubiKey": "ctrl+alt+c",
-                "Auto-Login OCR": "ctrl+alt+q",
-                "yubikey_auto_paste": False
+                "Auto-Login": "ctrl+alt+q",
+                "yubikey_auto_paste": False,
+                "auto_login_delay": 0.8
             },
             "tailscale": {
                 "port": 50051,
@@ -140,7 +142,6 @@ class DesktopAuthenticator:
         self.load_plugins()
         self.update_codes()
 
-        # Check if the app has been updated or is running for the very first time
         if self.config.get("version") != APP_VERSION:
             self.root.after(500, self.show_tutorial)
             self.config["version"] = APP_VERSION
@@ -149,36 +150,51 @@ class DesktopAuthenticator:
     def show_tutorial(self):
         tut = tk.Toplevel(self.root)
         tut.title("Welcome to OpenAuth")
-        tut.geometry("450x550")
+        tut.geometry("480x750")
         tut.attributes("-topmost", True)
         tut.configure(bg=self.colors['bg'])
         
         title = tk.Label(tut, text="🚀 Welcome to OpenAuth", font=("Helvetica", 16, "bold"), bg=self.colors['bg'], fg=self.colors['fg'])
-        title.pack(pady=(20, 5))
+        title.pack(pady=(15, 5))
         
-        # Clickable Hyperlink
         link = tk.Label(tut, text="🔗 Click here to open: aka.ms/mfasetup", font=("Helvetica", 11, "bold", "underline"), bg=self.colors['bg'], fg="#4da6ff", cursor="hand2")
         link.pack(pady=5)
         link.bind("<Button-1>", lambda e: webbrowser.open("https://aka.ms/mfasetup"))
 
         guide_text = (
-            "How to provision your first account:\n\n"
+            "How to provision your first account:\n"
             "1. Click the link above to open Microsoft Security Info.\n"
             "2. Click '+ Add sign-in method' and choose 'Authenticator app'.\n"
             "3. IMPORTANT: Click the small text that says: \n   'I want to use a different authenticator app'.\n"
             "4. Click 'Next' until the QR code is displayed on your screen.\n"
             "5. Click 'Scan Screen' in the OpenAuth toolbar above!\n\n"
             "---\n\n"
-            "Virtual YubiKey:\n"
-            "Press your global hotkey (default: Ctrl+Alt+C) anywhere in Windows "
-            "to instantly copy your primary code to your clipboard.\n\n"
-            "Tailscale Phone Sync:\n"
-            "Fetch your codes instantly on your Android phone using a Quick Tile "
-            "via your secure Tailscale VPN. See settings for your Secret API Token."
+            "Virtual YubiKey & Phone Sync:\n"
+            "Use your hotkey to copy codes instantly, or fetch them on your "
+            "Android phone using a Tailscale Quick Tile."
         )
+        msg = tk.Message(tut, text=guide_text, font=("Helvetica", 10), bg=self.colors['bg'], fg=self.colors['fg'], width=420, justify=tk.LEFT)
+        msg.pack(padx=20, pady=5)
         
-        msg = tk.Message(tut, text=guide_text, font=("Helvetica", 10), bg=self.colors['bg'], fg=self.colors['fg'], width=400, justify=tk.LEFT)
-        msg.pack(padx=20, pady=10)
+        # Auto-Login Image Section
+        lbl_al = tk.Label(tut, text="Auto Login:", font=("Helvetica", 10, "bold"), bg=self.colors['bg'], fg=self.colors['fg'])
+        lbl_al.pack(padx=20, pady=(5, 0), anchor="w")
+        
+        lbl_al2 = tk.Label(tut, text="Trigger the macro when on the following page:", font=("Helvetica", 10), bg=self.colors['bg'], fg=self.colors['fg'])
+        lbl_al2.pack(padx=20, pady=(0, 5), anchor="w")
+        
+        img_path = get_resource_path(os.path.join('plugins', 'auto_login_help.png'))
+        if os.path.exists(img_path):
+            try:
+                img = Image.open(img_path)
+                img.thumbnail((350, 350), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                img_lbl = tk.Label(tut, image=photo, bg=self.colors['bg'], borderwidth=1, relief="solid")
+                img_lbl.image = photo # Keep reference to prevent garbage collection!
+                img_lbl.pack(pady=5)
+            except Exception as e:
+                print(f"Could not load tutorial image: {e}")
+
         ttk.Button(tut, text="Got it!", command=tut.destroy).pack(pady=10)
 
     def get_icon_image(self):
@@ -251,7 +267,15 @@ class DesktopAuthenticator:
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r') as f:
-                    self.config.update(json.load(f))
+                    saved_config = json.load(f)
+                    self.config["first_run"] = saved_config.get("first_run", True)
+                    self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
+                    self.config["theme"] = saved_config.get("theme", "Light")
+                    
+                    # Carefully merge nested dictionaries so missing keys don't get deleted!
+                    self.config["plugins"].update(saved_config.get("plugins", {}))
+                    self.config["hotkeys"].update(saved_config.get("hotkeys", {}))
+                    self.config["tailscale"].update(saved_config.get("tailscale", {}))
             except Exception:
                 pass
                 
@@ -289,7 +313,7 @@ class DesktopAuthenticator:
     def open_settings(self):
         top = tk.Toplevel(self.root)
         top.title("OpenAuth Settings")
-        top.geometry("400x550")
+        top.geometry("420x600")
         top.attributes("-topmost", True)
         top.configure(bg=self.colors['bg'])
 
@@ -306,14 +330,13 @@ class DesktopAuthenticator:
         theme_var = tk.StringVar(value=self.config.get("theme", "Light"))
         ttk.Combobox(general_frame, textvariable=theme_var, values=["Light", "Dark"], state="readonly").pack(fill=tk.X, padx=10, pady=5)
         
-        # Version Label
         tk.Label(general_frame, text=f"OpenAuth Version: {APP_VERSION}", bg=self.colors['bg'], fg=self.colors['handle']).pack(anchor="w", padx=10, pady=(30, 0))
 
         sync_frame = ttk.Frame(notebook)
         notebook.add(sync_frame, text="Tailscale")
 
         tk.Label(sync_frame, text="Server Port:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(15, 2))
-        port_var = tk.IntVar(value=self.config["tailscale"].get("port", 50051))
+        port_var = tk.StringVar(value=str(self.config["tailscale"].get("port", 50051)))
         self.create_styled_entry(sync_frame, port_var).pack(fill=tk.X, padx=10, pady=2, ipady=3)
 
         tk.Label(sync_frame, text="Secret API Token:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(15, 2))
@@ -345,7 +368,7 @@ class DesktopAuthenticator:
         ttk.Separator(plugin_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=10)
 
         hk_vars = {}
-        for name in ["Virtual YubiKey", "Auto-Login OCR"]:
+        for name in ["Virtual YubiKey", "Auto-Login"]:
             tk.Label(plugin_frame, text=f"{name} Shortcut:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
             var = tk.StringVar(value=self.config["hotkeys"].get(name, ""))
             hk_vars[name] = var
@@ -356,36 +379,59 @@ class DesktopAuthenticator:
         ap_chk.pack(anchor="w", padx=10, pady=(5, 0))
         ToolTip(ap_chk, "If enabled, the hotkey will instantly type the code out and hit Enter.\nIf disabled, it will only copy the code to your clipboard.")
 
+        # Delay Variable Input
+        delay_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_delay", 0.8)))
+        tk.Label(plugin_frame, text="Auto-Login Network Delay (seconds):", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
+        delay_entry = self.create_styled_entry(plugin_frame, delay_var)
+        delay_entry.pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
+        ToolTip(delay_entry, "Increase this value (e.g. 1.2 or 2.0) if your network or Remote Desktop is slow and the macro types the code before the page loads.")
+
         btn_frame = tk.Frame(top, bg=self.colors['bg'])
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
 
         ttk.Button(btn_frame, text="Help / Tutorial", command=self.show_tutorial).pack(side=tk.LEFT)
 
         def save_and_apply():
-            self.config["start_on_boot"] = boot_var.get()
-            self.manage_startup(boot_var.get())
-            self.config["theme"] = theme_var.get()
-            self.config["tailscale"]["port"] = port_var.get()
-            self.config["hotkeys"]["yubikey_auto_paste"] = auto_paste_var.get()
-            
-            plugins_changed = False
-            for name, var in plugin_vars.items():
-                if self.config["plugins"][name] != var.get():
-                    plugins_changed = True
-                self.config["plugins"][name] = var.get()
+            try:
+                self.config["start_on_boot"] = boot_var.get()
+                self.manage_startup(boot_var.get())
+                self.config["theme"] = theme_var.get()
                 
-            for name, var in hk_vars.items():
-                self.config["hotkeys"][name] = var.get()
+                try:
+                    port_val = int(port_var.get())
+                except ValueError:
+                    port_val = 50051 
+                self.config["tailscale"]["port"] = port_val
                 
-            self.save_config()
-            
-            self.apply_theme_colors()
-            self.refresh_ui()
-            self.plugin_manager.broadcast('config_updated')
-            
-            top.destroy()
-            if plugins_changed:
-                messagebox.showinfo("Applied", "Theme, Hotkeys, and Tailscale settings applied instantly!\n\n(Note: Enabling or Disabling a plugin entirely still requires you to manually exit and reopen OpenAuth).")
+                self.config["hotkeys"]["yubikey_auto_paste"] = auto_paste_var.get()
+                
+                try:
+                    delay_val = float(delay_var.get())
+                except ValueError:
+                    delay_val = 0.8
+                self.config["hotkeys"]["auto_login_delay"] = delay_val
+                
+                plugins_changed = False
+                for name, var in plugin_vars.items():
+                    # SAFE CHECK: Use .get() to prevent KeyErrors on new plugins
+                    if self.config["plugins"].get(name) != var.get():
+                        plugins_changed = True
+                    self.config["plugins"][name] = var.get()
+                    
+                for name, var in hk_vars.items():
+                    self.config["hotkeys"][name] = var.get()
+                    
+                self.save_config()
+                
+                self.apply_theme_colors()
+                self.refresh_ui()
+                self.plugin_manager.broadcast('config_updated')
+                
+                top.destroy()
+                if plugins_changed:
+                    messagebox.showinfo("Applied", "Theme, Hotkeys, and Tailscale settings applied instantly!\n\n(Note: Enabling or Disabling a plugin entirely still requires you to manually exit and reopen OpenAuth).")
+            except Exception as e:
+                messagebox.showerror("Settings Error", f"An error occurred while saving:\n{str(e)}")
 
         ttk.Button(btn_frame, text="Save & Apply", command=save_and_apply).pack(side=tk.RIGHT)
 
@@ -497,6 +543,11 @@ class DesktopAuthenticator:
         self.update_job = self.root.after(1000, self.update_codes)
 
 if __name__ == "__main__":
+    mutex_name = "OpenAuth_Single_Instance_Mutex"
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    if ctypes.windll.kernel32.GetLastError() == 183: 
+        sys.exit(0)
+
     root = tk.Tk()
     app = DesktopAuthenticator(root)
     root.mainloop()
