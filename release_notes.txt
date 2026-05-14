@@ -1,2 +1,8 @@
-### What's New in v1.2.1 
-- Added a toast for Auto Login
+### What's New in v1.3.0 
+- Added automatic updates! If enabled, app now pulls newer versions from github on startup
+- rearranged settings for easier use
+- renamed Virtual YubiKey to Copy Code to Clipboard for easier use
+- fixed  tutorial reopening every time
+- added setting for auto login to change number of microsoft ways to verify, allows customisation for different organisations now
+- changed the default config for basic use
+- fixed start with windows to register in windows start up apps rather than using a .vbs script

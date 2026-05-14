@@ -9,6 +9,11 @@ import secrets
 import subprocess
 import webbrowser
 import ctypes
+import winreg 
+import threading
+import urllib.request
+import urllib.error
+import re  # Added for parsing Semantic Versioning (v1.2.3)
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
@@ -22,7 +27,8 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v1.2.1"
+APP_VERSION = "v1.3.0"
+GITHUB_REPO = "cookietank/OpenAuth"
 
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
 if not os.path.exists(APPDATA_DIR):
@@ -37,19 +43,19 @@ def get_resource_path(relative_path):
 
 AVAILABLE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
-    "Local Broadcaster": LocalBroadcasterPlugin,
     "Screen QR Scanner": ScreenQRScannerPlugin,
-    "Virtual YubiKey": VirtualYubiKeyPlugin,
+    "Copy Code to Clipboard": VirtualYubiKeyPlugin,
     "Auto-Login": AutoLoginPlugin,
+    "Local Broadcaster": LocalBroadcasterPlugin,
     "Tailscale Phone Sync": TailscaleSyncPlugin
 }
 
 PLUGIN_DESCRIPTIONS = {
     "Tray Icon": "Minimizes OpenAuth silently to the Windows System Tray.",
-    "Local Broadcaster": "Broadcasts codes over local UDP for external app integration.",
     "Screen QR Scanner": "Provisions accounts by grabbing and scanning QR codes directly from your screen.",
-    "Virtual YubiKey": "Provides a global keyboard shortcut to instantly copy (or paste) your primary code.",
+    "Copy Code to Clipboard": "Provides a global keyboard shortcut to instantly copy (or paste) your primary code.",
     "Auto-Login": "Uses an automated keystroke macro to instantly navigate Microsoft login screens and inject your code.",
+    "Local Broadcaster": "Broadcasts codes over local UDP for external app integration.",
     "Tailscale Phone Sync": "Hosts a secure API to send codes instantly to your phone via Tailscale VPN."
 }
 
@@ -97,21 +103,24 @@ class DesktopAuthenticator:
         
         self.config = {
             "version": "v1.0.0",
+            "show_tutorial": True,
+            "auto_update": True,
             "start_on_boot": False,
             "theme": "Light",
             "plugins": {
                 "Tray Icon": True,
-                "Local Broadcaster": True,
                 "Screen QR Scanner": True,
-                "Virtual YubiKey": True,
-                "Auto-Login": False,
-                "Tailscale Phone Sync": True
+                "Copy Code to Clipboard": True,
+                "Auto-Login": True,
+                "Local Broadcaster": False,
+                "Tailscale Phone Sync": False
             },
             "hotkeys": {
-                "Virtual YubiKey": "ctrl+alt+c",
+                "Copy Code to Clipboard": "ctrl+alt+c",
                 "Auto-Login": "ctrl+alt+q",
-                "yubikey_auto_paste": False,
-                "auto_login_delay": 0.8
+                "auto_paste": False,
+                "auto_login_delay": 0.8,
+                "auto_login_ways": 2
             },
             "tailscale": {
                 "port": 50051,
@@ -143,9 +152,92 @@ class DesktopAuthenticator:
         self.update_codes()
 
         if self.config.get("version") != APP_VERSION:
-            self.root.after(500, self.show_tutorial)
             self.config["version"] = APP_VERSION
             self.save_config()
+            if self.config.get("show_tutorial", True):
+                self.root.after(500, self.show_tutorial)
+
+        # Trigger OTA Update Check
+        if getattr(sys, 'frozen', False) and self.config.get("auto_update", True):
+            threading.Thread(target=self.check_for_updates, daemon=True).start()
+
+    def check_for_updates(self):
+        """Silently checks the GitHub API and parses semantic versions correctly."""
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(url, headers={'User-Agent': 'OpenAuth-Updater'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                latest_version = data.get('tag_name', '')
+                
+                if latest_version:
+                    # Parse "v1.2.3" into (1, 2, 3) to allow mathematical comparison
+                    def get_v_tuple(v_str):
+                        return tuple(map(int, re.findall(r'\d+', v_str)))
+                    
+                    latest_tuple = get_v_tuple(latest_version)
+                    current_tuple = get_v_tuple(APP_VERSION)
+                    
+                    # Only trigger if the cloud is mathematically greater than local
+                    if latest_tuple > current_tuple:
+                        download_url = None
+                        for asset in data.get('assets', []):
+                            if asset['name'].endswith('.exe'):
+                                download_url = asset['browser_download_url']
+                                break
+                                
+                        if download_url:
+                            self.root.after(0, lambda: self.prompt_update(latest_version, download_url))
+        except Exception as e:
+            print(f"Update check failed: {e}")
+
+    def prompt_update(self, latest_version, download_url):
+        if messagebox.askyesno("Update Available", f"A new version of OpenAuth ({latest_version}) is available!\n\nWould you like to automatically download and install it now?"):
+            threading.Thread(target=self.perform_update, args=(download_url,), daemon=True).start()
+
+    def perform_update(self, download_url):
+        for plugin in self.plugin_manager.plugins:
+            if hasattr(plugin, 'show_toast'):
+                plugin.show_toast("Downloading update... Please wait.", 5000)
+                break
+                
+        try:
+            current_exe = sys.executable
+            update_exe = current_exe + ".update"
+            
+            req = urllib.request.Request(download_url, headers={'User-Agent': 'OpenAuth-Updater'})
+            with urllib.request.urlopen(req) as response, open(update_exe, 'wb') as out_file:
+                out_file.write(response.read())
+                
+            self.apply_update_and_restart(update_exe, current_exe)
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Update Failed", f"Failed to download update:\n{e}"))
+
+    def apply_update_and_restart(self, update_exe, current_exe):
+        """Safely swaps the .exe without crashing PyInstaller's DLL loader."""
+        bat_path = os.path.join(os.path.dirname(current_exe), "apply_openauth_update.bat")
+        
+        # Uses a loop to ensure the old file is fully unlocked by Windows before deleting
+        bat_content = f'''@echo off
+:wait
+timeout /t 1 /nobreak > NUL
+del "{current_exe}"
+if exist "{current_exe}" goto wait
+move /Y "{update_exe}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+'''
+        with open(bat_path, "w") as f:
+            f.write(bat_content)
+            
+        # CRITICAL FIX: Strip PyInstaller variables before launching the batch script
+        env = os.environ.copy()
+        env.pop('_MEIPASS2', None)
+        env.pop('TCL_LIBRARY', None)
+        env.pop('TK_LIBRARY', None)
+            
+        subprocess.Popen(bat_path, shell=True, env=env, creationflags=0x00000008)
+        os._exit(0)
 
     def show_tutorial(self):
         tut = tk.Toplevel(self.root)
@@ -169,14 +261,13 @@ class DesktopAuthenticator:
             "4. Click 'Next' until the QR code is displayed on your screen.\n"
             "5. Click 'Scan Screen' in the OpenAuth toolbar above!\n\n"
             "---\n\n"
-            "Virtual YubiKey & Phone Sync:\n"
+            "Copy Code to Clipboard & Phone Sync:\n"
             "Use your hotkey to copy codes instantly, or fetch them on your "
             "Android phone using a Tailscale Quick Tile."
         )
         msg = tk.Message(tut, text=guide_text, font=("Helvetica", 10), bg=self.colors['bg'], fg=self.colors['fg'], width=420, justify=tk.LEFT)
         msg.pack(padx=20, pady=5)
         
-        # Auto-Login Image Section
         lbl_al = tk.Label(tut, text="Auto Login:", font=("Helvetica", 10, "bold"), bg=self.colors['bg'], fg=self.colors['fg'])
         lbl_al.pack(padx=20, pady=(5, 0), anchor="w")
         
@@ -190,7 +281,7 @@ class DesktopAuthenticator:
                 img.thumbnail((350, 350), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(img)
                 img_lbl = tk.Label(tut, image=photo, bg=self.colors['bg'], borderwidth=1, relief="solid")
-                img_lbl.image = photo # Keep reference to prevent garbage collection!
+                img_lbl.image = photo 
                 img_lbl.pack(pady=5)
             except Exception as e:
                 print(f"Could not load tutorial image: {e}")
@@ -268,11 +359,12 @@ class DesktopAuthenticator:
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     saved_config = json.load(f)
-                    self.config["first_run"] = saved_config.get("first_run", True)
+                    self.config["version"] = saved_config.get("version", "v1.0.0")
+                    self.config["show_tutorial"] = saved_config.get("show_tutorial", True)
+                    self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
                     self.config["theme"] = saved_config.get("theme", "Light")
                     
-                    # Carefully merge nested dictionaries so missing keys don't get deleted!
                     self.config["plugins"].update(saved_config.get("plugins", {}))
                     self.config["hotkeys"].update(saved_config.get("hotkeys", {}))
                     self.config["tailscale"].update(saved_config.get("tailscale", {}))
@@ -288,43 +380,57 @@ class DesktopAuthenticator:
             json.dump(self.config, f, indent=4)
 
     def manage_startup(self, enable):
-        startup_dir = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup')
-        vbs_path = os.path.join(startup_dir, "OpenAuth.vbs")
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "OpenAuth"
         
-        if enable:
-            if getattr(sys, 'frozen', False):
-                app_path = sys.executable
-                vbs_content = f'Set WshShell = CreateObject("WScript.Shell")\n' \
-                              f'WshShell.Run """{app_path}"" --tray", 0, False'
+        vbs_path = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+        if os.path.exists(vbs_path):
+            try: os.remove(vbs_path)
+            except: pass
+
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
+            if enable:
+                if getattr(sys, 'frozen', False):
+                    app_path = f'"{sys.executable}" --tray'
+                else:
+                    pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
+                    script_path = os.path.abspath(sys.argv[0])
+                    app_path = f'"{pythonw_path}" "{script_path}" --tray'
+                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
             else:
-                pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
-                app_path = os.path.abspath(sys.argv[0])
-                vbs_content = f'Set WshShell = CreateObject("WScript.Shell")\n' \
-                              f'WshShell.Run """{pythonw_path}"" ""{app_path}"" --tray", 0, False'
-            try:
-                with open(vbs_path, 'w') as f:
-                    f.write(vbs_content)
-            except Exception as e:
-                print(f"Failed to add to startup: {e}")
-        else:
-            if os.path.exists(vbs_path):
-                os.remove(vbs_path)
+                try:
+                    winreg.DeleteValue(key, app_name)
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(key)
+        except Exception as e:
+            print(f"Failed to manage startup registry: {e}")
 
     def open_settings(self):
         top = tk.Toplevel(self.root)
         top.title("OpenAuth Settings")
-        top.geometry("420x600")
+        top.geometry("450x640")
         top.attributes("-topmost", True)
         top.configure(bg=self.colors['bg'])
 
         notebook = ttk.Notebook(top)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+        plugin_vars = {}
+
+        # TAB 1: General
         general_frame = ttk.Frame(notebook)
         notebook.add(general_frame, text="General")
         
         boot_var = tk.BooleanVar(value=self.config.get("start_on_boot", False))
         ttk.Checkbutton(general_frame, text="Start with Windows (Hidden in Tray)", variable=boot_var).pack(anchor="w", padx=10, pady=(15, 5))
+        
+        update_var = tk.BooleanVar(value=self.config.get("auto_update", True))
+        ttk.Checkbutton(general_frame, text="Check for updates automatically on launch", variable=update_var).pack(anchor="w", padx=10, pady=5)
+        
+        tut_var = tk.BooleanVar(value=self.config.get("show_tutorial", True))
+        ttk.Checkbutton(general_frame, text="Show Tutorial on App Updates", variable=tut_var).pack(anchor="w", padx=10, pady=5)
         
         tk.Label(general_frame, text="App Theme:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 0))
         theme_var = tk.StringVar(value=self.config.get("theme", "Light"))
@@ -332,15 +438,65 @@ class DesktopAuthenticator:
         
         tk.Label(general_frame, text=f"OpenAuth Version: {APP_VERSION}", bg=self.colors['bg'], fg=self.colors['handle']).pack(anchor="w", padx=10, pady=(30, 0))
 
-        sync_frame = ttk.Frame(notebook)
-        notebook.add(sync_frame, text="Tailscale")
+        # TAB 2: Plugins & Hotkeys
+        plugin_frame = ttk.Frame(notebook)
+        notebook.add(plugin_frame, text="Plugins & Hotkeys")
+        
+        tk.Label(plugin_frame, text="Core Modules", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
 
-        tk.Label(sync_frame, text="Server Port:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(15, 2))
+        core_plugins = ["Tray Icon", "Screen QR Scanner", "Copy Code to Clipboard", "Auto-Login"]
+        for name in core_plugins:
+            var = tk.BooleanVar(value=self.config["plugins"].get(name, AVAILABLE_PLUGINS.get(name) is not None))
+            plugin_vars[name] = var
+            chk = ttk.Checkbutton(plugin_frame, text=f"Enable {name}", variable=var)
+            chk.pack(anchor="w", padx=10, pady=2)
+            ToolTip(chk, PLUGIN_DESCRIPTIONS.get(name, ""))
+
+        ttk.Separator(plugin_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=10)
+
+        hk_vars = {}
+        for name in ["Copy Code to Clipboard", "Auto-Login"]:
+            tk.Label(plugin_frame, text=f"{name} Shortcut:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
+            var = tk.StringVar(value=self.config["hotkeys"].get(name, ""))
+            hk_vars[name] = var
+            self.create_styled_entry(plugin_frame, var).pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
+
+        auto_paste_var = tk.BooleanVar(value=self.config["hotkeys"].get("auto_paste", False))
+        ap_chk = ttk.Checkbutton(plugin_frame, text="Auto-Paste Code (Inject Keystrokes & Press Enter)", variable=auto_paste_var)
+        ap_chk.pack(anchor="w", padx=10, pady=(5, 0))
+
+        delay_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_delay", 0.8)))
+        tk.Label(plugin_frame, text="Auto-Login Network Delay (seconds):", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
+        delay_entry = self.create_styled_entry(plugin_frame, delay_var)
+        delay_entry.pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
+        
+        ways_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_ways", 2)))
+        tk.Label(plugin_frame, text="Auto-Login 'Ways to Verify' count:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
+        ways_entry = self.create_styled_entry(plugin_frame, ways_var)
+        ways_entry.pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
+
+        # TAB 3: Advanced
+        adv_frame = ttk.Frame(notebook)
+        notebook.add(adv_frame, text="Advanced")
+
+        tk.Label(adv_frame, text="Network & Broadcast Modules", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
+
+        adv_plugins = ["Local Broadcaster", "Tailscale Phone Sync"]
+        for name in adv_plugins:
+            var = tk.BooleanVar(value=self.config["plugins"].get(name, False))
+            plugin_vars[name] = var
+            chk = ttk.Checkbutton(adv_frame, text=f"Enable {name}", variable=var)
+            chk.pack(anchor="w", padx=10, pady=2)
+            ToolTip(chk, PLUGIN_DESCRIPTIONS.get(name, ""))
+
+        ttk.Separator(adv_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=10)
+
+        tk.Label(adv_frame, text="Tailscale Server Port:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 2))
         port_var = tk.StringVar(value=str(self.config["tailscale"].get("port", 50051)))
-        self.create_styled_entry(sync_frame, port_var).pack(fill=tk.X, padx=10, pady=2, ipady=3)
+        self.create_styled_entry(adv_frame, port_var).pack(fill=tk.X, padx=10, pady=2, ipady=3)
 
-        tk.Label(sync_frame, text="Secret API Token:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(15, 2))
-        token_frame = tk.Frame(sync_frame, bg=self.colors['bg'])
+        tk.Label(adv_frame, text="Tailscale Secret API Token:", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(15, 2))
+        token_frame = tk.Frame(adv_frame, bg=self.colors['bg'])
         token_frame.pack(fill=tk.X, padx=10)
         
         token_var = tk.StringVar(value=self.config["tailscale"].get("api_token", ""))
@@ -354,38 +510,7 @@ class DesktopAuthenticator:
 
         ttk.Button(token_frame, text="↻", width=3, command=regen_token).pack(side=tk.LEFT, padx=5)
 
-        plugin_frame = ttk.Frame(notebook)
-        notebook.add(plugin_frame, text="Plugins & Hotkeys")
-
-        plugin_vars = {}
-        for name in AVAILABLE_PLUGINS.keys():
-            var = tk.BooleanVar(value=self.config["plugins"].get(name, False))
-            plugin_vars[name] = var
-            chk = ttk.Checkbutton(plugin_frame, text=f"Enable {name}", variable=var)
-            chk.pack(anchor="w", padx=10, pady=2)
-            ToolTip(chk, PLUGIN_DESCRIPTIONS.get(name, ""))
-
-        ttk.Separator(plugin_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=10)
-
-        hk_vars = {}
-        for name in ["Virtual YubiKey", "Auto-Login"]:
-            tk.Label(plugin_frame, text=f"{name} Shortcut:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
-            var = tk.StringVar(value=self.config["hotkeys"].get(name, ""))
-            hk_vars[name] = var
-            self.create_styled_entry(plugin_frame, var).pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
-
-        auto_paste_var = tk.BooleanVar(value=self.config["hotkeys"].get("yubikey_auto_paste", False))
-        ap_chk = ttk.Checkbutton(plugin_frame, text="YubiKey Auto-Paste (Inject Keystrokes & Press Enter)", variable=auto_paste_var)
-        ap_chk.pack(anchor="w", padx=10, pady=(5, 0))
-        ToolTip(ap_chk, "If enabled, the hotkey will instantly type the code out and hit Enter.\nIf disabled, it will only copy the code to your clipboard.")
-
-        # Delay Variable Input
-        delay_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_delay", 0.8)))
-        tk.Label(plugin_frame, text="Auto-Login Network Delay (seconds):", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(5, 0))
-        delay_entry = self.create_styled_entry(plugin_frame, delay_var)
-        delay_entry.pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
-        ToolTip(delay_entry, "Increase this value (e.g. 1.2 or 2.0) if your network or Remote Desktop is slow and the macro types the code before the page loads.")
-
+        # Bottom Buttons
         btn_frame = tk.Frame(top, bg=self.colors['bg'])
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
 
@@ -395,6 +520,8 @@ class DesktopAuthenticator:
             try:
                 self.config["start_on_boot"] = boot_var.get()
                 self.manage_startup(boot_var.get())
+                self.config["auto_update"] = update_var.get()
+                self.config["show_tutorial"] = tut_var.get()
                 self.config["theme"] = theme_var.get()
                 
                 try:
@@ -403,7 +530,7 @@ class DesktopAuthenticator:
                     port_val = 50051 
                 self.config["tailscale"]["port"] = port_val
                 
-                self.config["hotkeys"]["yubikey_auto_paste"] = auto_paste_var.get()
+                self.config["hotkeys"]["auto_paste"] = auto_paste_var.get()
                 
                 try:
                     delay_val = float(delay_var.get())
@@ -411,9 +538,14 @@ class DesktopAuthenticator:
                     delay_val = 0.8
                 self.config["hotkeys"]["auto_login_delay"] = delay_val
                 
+                try:
+                    ways_val = int(ways_var.get())
+                except ValueError:
+                    ways_val = 2
+                self.config["hotkeys"]["auto_login_ways"] = ways_val
+                
                 plugins_changed = False
                 for name, var in plugin_vars.items():
-                    # SAFE CHECK: Use .get() to prevent KeyErrors on new plugins
                     if self.config["plugins"].get(name) != var.get():
                         plugins_changed = True
                     self.config["plugins"][name] = var.get()
@@ -429,7 +561,7 @@ class DesktopAuthenticator:
                 
                 top.destroy()
                 if plugins_changed:
-                    messagebox.showinfo("Applied", "Theme, Hotkeys, and Tailscale settings applied instantly!\n\n(Note: Enabling or Disabling a plugin entirely still requires you to manually exit and reopen OpenAuth).")
+                    messagebox.showinfo("Applied", "Theme, Hotkeys, and settings applied instantly!\n\n(Note: Enabling or Disabling a plugin entirely still requires you to manually exit and reopen OpenAuth).")
             except Exception as e:
                 messagebox.showerror("Settings Error", f"An error occurred while saving:\n{str(e)}")
 

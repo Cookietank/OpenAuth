@@ -70,15 +70,13 @@ class AutoLoginPlugin(PluginBase):
 
     def execute_automation(self):
         print("\n[AUTO-LOGIN] Sequence Initiated via Keystrokes!")
-        
-        # Fire the toast notification safely on the Tkinter main thread
         self.app.root.after(0, self.show_toast, "Triggering Microsoft Auto Login")
-        
         threading.Thread(target=self._run_sequence, daemon=True).start()
 
     def _run_sequence(self):
         try:
             delay = float(self.app.config.get("hotkeys", {}).get("auto_login_delay", 0.8))
+            ways_to_verify = int(self.app.config.get("hotkeys", {}).get("auto_login_ways", 2))
             
             keyboard.release('ctrl')
             keyboard.release('alt')
@@ -91,9 +89,16 @@ class AutoLoginPlugin(PluginBase):
             
             time.sleep(delay)
             
-            print("[AUTO-LOGIN] Step 2: Tab -> Enter")
-            keyboard.send('tab')
-            time.sleep(0.1)
+            # Step 2: Dynamic Tabs
+            # If ways_to_verify is 2, it loops 1 time (Tab -> Enter)
+            # If ways_to_verify is 3, it loops 2 times (Tab -> Tab -> Enter)
+            tabs_needed = ways_to_verify - 1
+            print(f"[AUTO-LOGIN] Step 2: {tabs_needed}x Tab -> Enter")
+            
+            for _ in range(tabs_needed):
+                keyboard.send('tab')
+                time.sleep(0.1)
+                
             keyboard.send('enter')
             
             code = self.get_target_code()
@@ -102,7 +107,6 @@ class AutoLoginPlugin(PluginBase):
                 self.app.root.after(0, self.copy_to_clipboard, code)
             else:
                 print("[AUTO-LOGIN] No code available to copy!")
-                # Show an error toast if it failed
                 self.app.root.after(0, self.show_toast, "Error: No Primary Code available!")
                 return
                 

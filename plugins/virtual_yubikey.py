@@ -14,13 +14,13 @@ class VirtualYubiKeyPlugin(PluginBase):
         threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
 
     def start_hotkey_listener(self):
-        hotkey = self.app.config.get("hotkeys", {}).get("Virtual YubiKey", "ctrl+alt+c")
+        hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c")
         self.bind_hotkey(hotkey)
         keyboard.wait()
 
     def config_updated(self):
         """Live Apply: Instantly rebind the hotkey if changed in settings."""
-        new_hotkey = self.app.config.get("hotkeys", {}).get("Virtual YubiKey", "")
+        new_hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "")
         self.bind_hotkey(new_hotkey)
 
     def bind_hotkey(self, new_hotkey):
@@ -36,7 +36,7 @@ class VirtualYubiKeyPlugin(PluginBase):
             
         try:
             self.hotkey_hook = keyboard.add_hotkey(new_hotkey, self.execute_hotkey_action)
-            print(f"Bound YubiKey Copy to: {new_hotkey}")
+            print(f"Bound Copy Code Macro to: {new_hotkey}")
         except Exception as e:
             print(f"Failed to bind hotkey: {e}")
 
@@ -78,7 +78,7 @@ class VirtualYubiKeyPlugin(PluginBase):
 
     def _process_code(self, code, rem_time):
         self.app.root.after(0, self.copy_to_clipboard, code)
-        auto_paste = self.app.config.get("hotkeys", {}).get("yubikey_auto_paste", False)
+        auto_paste = self.app.config.get("hotkeys", {}).get("auto_paste", False)
         
         if auto_paste:
             try:
