@@ -1,5 +1,6 @@
 import threading
 import time
+import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -14,6 +15,10 @@ class VirtualYubiKeyPlugin(PluginBase):
         threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
 
     def start_hotkey_listener(self):
+        # Boot Delay Fix: Windows drops hooks if applied before the desktop is ready
+        if "--tray" in sys.argv:
+            time.sleep(5)
+            
         hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c")
         self.bind_hotkey(hotkey)
         keyboard.wait()

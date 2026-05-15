@@ -1,5 +1,6 @@
 import threading
 import time
+import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -14,6 +15,10 @@ class AutoLoginPlugin(PluginBase):
         threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
 
     def start_hotkey_listener(self):
+        # Boot Delay Fix: Windows drops hooks if applied before the desktop is ready
+        if "--tray" in sys.argv:
+            time.sleep(5)
+            
         hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q")
         self.bind_hotkey(hotkey)
         keyboard.wait()
@@ -89,9 +94,6 @@ class AutoLoginPlugin(PluginBase):
             
             time.sleep(delay)
             
-            # Step 2: Dynamic Tabs
-            # If ways_to_verify is 2, it loops 1 time (Tab -> Enter)
-            # If ways_to_verify is 3, it loops 2 times (Tab -> Tab -> Enter)
             tabs_needed = ways_to_verify - 1
             print(f"[AUTO-LOGIN] Step 2: {tabs_needed}x Tab -> Enter")
             

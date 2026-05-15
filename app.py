@@ -27,7 +27,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.3.1"
 GITHUB_REPO = "cookietank/OpenAuth"
 
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
