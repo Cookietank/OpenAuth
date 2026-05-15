@@ -13,7 +13,7 @@ import winreg
 import threading
 import urllib.request
 import urllib.error
-import re  # Added for parsing Semantic Versioning (v1.2.3)
+import re
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
@@ -27,7 +27,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v1.3.1"
+APP_VERSION = "v1.3.2"
 GITHUB_REPO = "cookietank/OpenAuth"
 
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
@@ -154,6 +154,11 @@ class DesktopAuthenticator:
         if self.config.get("version") != APP_VERSION:
             self.config["version"] = APP_VERSION
             self.save_config()
+            
+            # Re-sync the startup registry natively just in case the EXE name changed!
+            if self.config.get("start_on_boot", False):
+                self.manage_startup(True)
+                
             if self.config.get("show_tutorial", True):
                 self.root.after(500, self.show_tutorial)
 
@@ -162,7 +167,7 @@ class DesktopAuthenticator:
             threading.Thread(target=self.check_for_updates, daemon=True).start()
 
     def check_for_updates(self):
-        """Silently checks the GitHub API and parses semantic versions correctly."""
+        """Silently checks the GitHub API using Mathematical Semantic Versioning."""
         try:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
             req = urllib.request.Request(url, headers={'User-Agent': 'OpenAuth-Updater'})
@@ -171,31 +176,33 @@ class DesktopAuthenticator:
                 latest_version = data.get('tag_name', '')
                 
                 if latest_version:
-                    # Parse "v1.2.3" into (1, 2, 3) to allow mathematical comparison
                     def get_v_tuple(v_str):
                         return tuple(map(int, re.findall(r'\d+', v_str)))
                     
                     latest_tuple = get_v_tuple(latest_version)
                     current_tuple = get_v_tuple(APP_VERSION)
                     
-                    # Only trigger if the cloud is mathematically greater than local
+                    # Only trigger if cloud version is mathematically greater (e.g. 1.2.4 > 1.2.3)
                     if latest_tuple > current_tuple:
                         download_url = None
+                        asset_name = f"OpenAuth_{latest_version}.exe"
+                        
                         for asset in data.get('assets', []):
                             if asset['name'].endswith('.exe'):
                                 download_url = asset['browser_download_url']
+                                asset_name = asset['name'] # Get the actual named file from GitHub
                                 break
                                 
                         if download_url:
-                            self.root.after(0, lambda: self.prompt_update(latest_version, download_url))
+                            self.root.after(0, lambda: self.prompt_update(latest_version, download_url, asset_name))
         except Exception as e:
             print(f"Update check failed: {e}")
 
-    def prompt_update(self, latest_version, download_url):
+    def prompt_update(self, latest_version, download_url, asset_name):
         if messagebox.askyesno("Update Available", f"A new version of OpenAuth ({latest_version}) is available!\n\nWould you like to automatically download and install it now?"):
-            threading.Thread(target=self.perform_update, args=(download_url,), daemon=True).start()
+            threading.Thread(target=self.perform_update, args=(download_url, asset_name), daemon=True).start()
 
-    def perform_update(self, download_url):
+    def perform_update(self, download_url, asset_name):
         for plugin in self.plugin_manager.plugins:
             if hasattr(plugin, 'show_toast'):
                 plugin.show_toast("Downloading update... Please wait.", 5000)
@@ -203,35 +210,56 @@ class DesktopAuthenticator:
                 
         try:
             current_exe = sys.executable
-            update_exe = current_exe + ".update"
+            exe_dir = os.path.dirname(current_exe)
+            
+            # Temporary download file
+            temp_exe = current_exe + ".update"
+            
+            # The final correct versioned filename
+            new_exe = os.path.join(exe_dir, asset_name)
             
             req = urllib.request.Request(download_url, headers={'User-Agent': 'OpenAuth-Updater'})
-            with urllib.request.urlopen(req) as response, open(update_exe, 'wb') as out_file:
+            with urllib.request.urlopen(req) as response, open(temp_exe, 'wb') as out_file:
                 out_file.write(response.read())
                 
-            self.apply_update_and_restart(update_exe, current_exe)
+            self.apply_update_and_restart(temp_exe, new_exe, current_exe)
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Update Failed", f"Failed to download update:\n{e}"))
 
-    def apply_update_and_restart(self, update_exe, current_exe):
-        """Safely swaps the .exe without crashing PyInstaller's DLL loader."""
+    def apply_update_and_restart(self, temp_exe, new_exe, current_exe):
+        """Bypasses file locks, applies the renamed .exe, and prevents PyInstaller DLL crashes."""
+        
+        # 1. Update the Windows Startup Registry immediately before we close to point to the NEW filename
+        if self.config.get("start_on_boot", False):
+            self.manage_startup(True, exe_override=new_exe)
+            
         bat_path = os.path.join(os.path.dirname(current_exe), "apply_openauth_update.bat")
         
-        # Uses a loop to ensure the old file is fully unlocked by Windows before deleting
+        # Setup the correct move command based on if the user renamed the app or not
+        if current_exe == new_exe:
+            move_cmd = f'move /Y "{temp_exe}" "{current_exe}"'
+            launch_exe = current_exe
+        else:
+            move_cmd = f'move /Y "{temp_exe}" "{new_exe}"'
+            launch_exe = new_exe
+
+        # 2. Write the background batch script
         bat_content = f'''@echo off
 :wait
 timeout /t 1 /nobreak > NUL
 del "{current_exe}"
 if exist "{current_exe}" goto wait
-move /Y "{update_exe}" "{current_exe}"
-start "" "{current_exe}"
+{move_cmd}
+start "" "{launch_exe}"
 del "%~f0"
 '''
         with open(bat_path, "w") as f:
             f.write(bat_content)
             
-        # CRITICAL FIX: Strip PyInstaller variables before launching the batch script
+        # 3. CRITICAL FIX: Strip all PyInstaller temporary variables from the environment 
+        # so the new .exe extracts a fresh set of DLLs instead of looking for the deleted ones!
         env = os.environ.copy()
+        env.pop('_MEIPASS', None)
         env.pop('_MEIPASS2', None)
         env.pop('TCL_LIBRARY', None)
         env.pop('TK_LIBRARY', None)
@@ -379,7 +407,8 @@ del "%~f0"
         with open(CONFIG_FILE, 'w') as f:
             json.dump(self.config, f, indent=4)
 
-    def manage_startup(self, enable):
+    def manage_startup(self, enable, exe_override=None):
+        """Native OS Registry hook. Uses exe_override during an OTA update."""
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         app_name = "OpenAuth"
         
@@ -392,7 +421,9 @@ del "%~f0"
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
             if enable:
                 if getattr(sys, 'frozen', False):
-                    app_path = f'"{sys.executable}" --tray'
+                    # Use the new file name if it's currently updating
+                    target_exe = exe_override if exe_override else sys.executable
+                    app_path = f'"{target_exe}" --tray'
                 else:
                     pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
                     script_path = os.path.abspath(sys.argv[0])

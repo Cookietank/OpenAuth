@@ -1,2 +1,2 @@
-### What's New in v1.3.1 
-- Fixed keyboard shortcuts not automatically working after a restart, even if the app started
+### What's New in v1.3.2 
+- Fixed autoupdater failing to rename exe bug + python MEI error
