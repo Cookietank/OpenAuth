@@ -16,3 +16,5 @@ yubikey_config.json
 openauth.log
 *.log
 *.bat
+bump_version.py
+make_ico.py
