@@ -107,8 +107,6 @@ Ensure you are in the project root directory and run the following PyInstaller c
 ```bash
 pyinstaller --noconsole --onefile --name "OpenAuth" --icon=plugins/icon.ico --add-data "plugins/*;plugins" --collect-all pyzbar --collect-all keyring --hidden-import PIL._tkinter_finder app.py
 ```
-*(We highly recommend using the included batch scripts `1_test_build.bat` and `3_publish_release.bat` to automate your CI/CD pipeline!)*
-
 ---
 
 ## ❓ FAQ
