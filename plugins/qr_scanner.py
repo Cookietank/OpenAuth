@@ -6,17 +6,18 @@ import tkinter.filedialog as filedialog
 
 class ScreenQRScannerPlugin(PluginBase):
     def setup(self):
-        # Inject both buttons into the main UI
-        self.app.add_toolbar_action("Scan Screen", self.scan_screen)
-        self.app.add_toolbar_action("Upload Image", self.upload_image)
+        if hasattr(self.app, 'add_auth_action'):
+            self.app.add_auth_action("Scan Screen for QR", self.scan_screen)
+            self.app.add_auth_action("Upload QR Image", self.upload_image)
+        else:
+            self.app.add_toolbar_action("Scan Screen", self.scan_screen)
+            self.app.add_toolbar_action("Upload Image", self.upload_image)
 
     def process_image(self, img):
-        """Decodes an image and attempts to add the TOTP account."""
         decoded_objects = decode(img)
         for obj in decoded_objects:
             data = obj.data.decode('utf-8')
             if data.startswith("otpauth://totp/"):
-                # Ensure the app accepted it before showing success
                 success = self.app.add_account(data)
                 if success:
                     messagebox.showinfo("Success", "Account provisioned successfully!")
@@ -24,7 +25,6 @@ class ScreenQRScannerPlugin(PluginBase):
         return False
 
     def scan_screen(self):
-        """Takes a screenshot to find a QR code."""
         try:
             screen = ImageGrab.grab(all_screens=True)
             found = self.process_image(screen)
@@ -34,14 +34,13 @@ class ScreenQRScannerPlugin(PluginBase):
             messagebox.showerror("Error", f"Failed to scan screen: {str(e)}")
 
     def upload_image(self):
-        """Allows the user to manually upload a saved screenshot of a QR code."""
         try:
             filepath = filedialog.askopenfilename(
                 title="Select QR Code Image",
                 filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")]
             )
             if not filepath:
-                return # User cancelled
+                return 
             
             img = Image.open(filepath)
             found = self.process_image(img)

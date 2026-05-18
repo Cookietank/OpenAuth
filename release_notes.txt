@@ -1,2 +1,19 @@
-### What's New in v1.3.2 
-- Fixed autoupdater failing to rename exe bug + python MEI error
+### What's New in v0.1.4.0 
+🌟 Major Features
+- Interactive Onboarding Wizard: Replaced the text tutorial with a step-by-step setup wizard
+- You can now manually provision accounts by typing in a raw Secret Key or pasting an otpauth:// URI.
+- Added a secure export window (in Advanced Settings) to extract your raw 2FA secrets and URIs so you can back them up to a password manager.
+- Added a "Danger Zone" button in settings and a --uninstall command-line flag. This securely wipes your OS Keyring, AppData configs, and Registry keys.
+- Since the app runs without a console, it now silently logs all errors to openauth.log. The new "Report an Issue" button opens the log folder and copies a GitHub issue template to your clipboard.
+
+🎨 UI & UX Improvements
+- The main app window now mathematically snaps its height to perfectly fit 1, 2, or 3 accounts without leaving awkward empty space.
+- Consolidated Toolbar: Merged "Scan Screen", "Upload Image", and "Add Manually" into a clean "➕ Add Auth Key" dropdown menu to declutter the UI.
+- Added a one-time educational popup explaining how the System Tray works. Once acknowledged, it permanently removes the redundant "To Tray" button.
+- The tutorial now reads your config file and injects your actual custom hotkeys into the instructions instead of showing hardcoded defaults.
+- Prevented a bug where clicking the Settings button multiple times would open duplicate windows.
+
+🔧 Stability & Bug Fixes
+- Fixed a Windows OS bug where global hotkeys would fail to bind if the app launched too quickly during PC startup. It now waits 15 seconds for the CPU to settle and uses an infinite resilience loop to keep the hook alive.
+- The auto-updater now mathematically parses semantic versions (e.g. [1,3,2]) and handles .exe file-swapping seamlessly without relying on temporary dummy files.
+- fixed wording of tutorial to match microsoft page

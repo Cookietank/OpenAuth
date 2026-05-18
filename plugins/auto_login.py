@@ -15,13 +15,19 @@ class AutoLoginPlugin(PluginBase):
         threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
 
     def start_hotkey_listener(self):
-        # Boot Delay Fix: Windows drops hooks if applied before the desktop is ready
+        # 15-second delay ensures Windows CPU settles before hooking
         if "--tray" in sys.argv:
-            time.sleep(5)
+            time.sleep(15)
             
         hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q")
         self.bind_hotkey(hotkey)
-        keyboard.wait()
+        
+        # Infinite loop ensures the listener survives if Windows drops the hook
+        while True:
+            try:
+                keyboard.wait()
+            except Exception:
+                time.sleep(2)
 
     def config_updated(self):
         """Live Apply: Instantly rebind the hotkey if changed in settings."""

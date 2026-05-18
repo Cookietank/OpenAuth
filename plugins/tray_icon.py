@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 import threading
 import sys
 import pystray
@@ -6,12 +7,43 @@ from plugin_manager import PluginBase
 
 class TrayIconPlugin(PluginBase):
     def setup(self):
-        self.app.add_toolbar_action("To Tray", self.minimize_to_tray, side=tk.RIGHT)
+        self.to_tray_btn = None
+        
+        if not self.app.config.get("understood_tray", False):
+            self.to_tray_btn = self.app.add_toolbar_action("To Tray", self.tray_tutorial_click, side=tk.RIGHT)
         
         self.app.root.bind("<Unmap>", self.on_unmap)
         
         if "--tray" in sys.argv:
             self.app.root.after(100, self.minimize_to_tray)
+
+    def tray_tutorial_click(self):
+        tut = tk.Toplevel(self.app.root)
+        tut.title("System Tray")
+        tut.geometry("380x250")
+        tut.attributes("-topmost", True)
+        tut.configure(bg=self.app.colors['bg'])
+        
+        tk.Label(tut, text="ℹ️ Hiding in the Tray", font=("Helvetica", 12, "bold"), bg=self.app.colors['bg'], fg=self.app.colors['fg']).pack(pady=15)
+        
+        msg = "OpenAuth is designed to run silently in the background.\n\nIt minimizes to your Windows System Tray (the small icons near your clock in the bottom right of your screen).\n\nPro Tip: The standard Windows Minimize (-) button does the exact same thing!"
+        tk.Message(tut, text=msg, bg=self.app.colors['bg'], fg=self.app.colors['fg'], width=340, justify=tk.LEFT).pack(padx=20, pady=5)
+        
+        understand_var = tk.BooleanVar(value=True)
+        chk = ttk.Checkbutton(tut, text="I understand, remove this 'To Tray' button", variable=understand_var)
+        chk.pack(pady=10)
+        
+        def proceed():
+            if understand_var.get():
+                self.app.config["understood_tray"] = True
+                self.app.save_config()
+                if self.to_tray_btn:
+                    self.to_tray_btn.pack_forget()
+                    self.to_tray_btn.destroy()
+            tut.destroy()
+            self.minimize_to_tray()
+
+        ttk.Button(tut, text="Got it!", command=proceed).pack(pady=10)
 
     def on_unmap(self, event):
         if event.widget == self.app.root and self.app.root.state() == 'iconic':
@@ -29,9 +61,7 @@ class TrayIconPlugin(PluginBase):
         image = self.app.get_icon_image()
         
         menu = pystray.Menu(
-            # default=True executes when you Double-Click the tray icon
             pystray.MenuItem('Show OpenAuth', self.restore_from_tray, default=True),
-            # New Copy action right in the tray menu!
             pystray.MenuItem('Copy Primary Code', self.copy_from_tray),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit', self.quit_from_tray)
@@ -40,19 +70,13 @@ class TrayIconPlugin(PluginBase):
         self.icon.run()
 
     def copy_from_tray(self, icon, item):
-        """Copies the code safely in the Tkinter thread and shows a Windows Native Toast."""
         if self.app.accounts:
             code = self.app.accounts[0].get_current_code()
-            
-            # Tkinter clipboard must be accessed from the main GUI thread
             def safe_copy():
                 self.app.root.clipboard_clear()
                 self.app.root.clipboard_append(code)
                 self.app.root.update()
-                
             self.app.root.after(0, safe_copy)
-            
-            # Use pystray's built-in Windows Notification API
             try:
                 self.icon.notify(f"Code copied: {code}", "OpenAuth")
             except Exception as e:
@@ -60,6 +84,8 @@ class TrayIconPlugin(PluginBase):
 
     def restore_from_tray(self, icon, item):
         self.icon.stop() 
+        # SNAP TO FIT: Resize the window mathematically before restoring it!
+        self.app.root.after(0, self.app.resize_main_window)
         self.app.root.after(0, self.app.root.deiconify) 
 
     def quit_from_tray(self, icon, item):
