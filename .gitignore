@@ -13,4 +13,6 @@ dist/
 app_config.json
 tailscale_config.json
 yubikey_config.json
+openauth.log
 *.log
+*.bat
