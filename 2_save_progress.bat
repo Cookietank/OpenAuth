@@ -1,4 +1,7 @@
 @echo off
+:: Force Command Prompt to render UTF-8 Emojis correctly
+chcp 65001 >nul
+
 title OpenAuth Save Progress
 echo ========================================
 echo ☁️ Backing up to GitHub
@@ -15,15 +18,16 @@ if "%msg%"=="" (
 )
 
 echo.
-echo [*] Syncing with GitHub cloud...
-:: Pull changes first so we don't get rejected
-git pull --rebase
-
-echo [*] Staging and Committing...
+echo [*] 1. Staging and Committing local changes...
 git add .
 git commit -m "%msg%"
 
-echo [*] Pushing to GitHub...
+echo.
+echo [*] 2. Syncing with GitHub cloud...
+git pull --rebase
+
+echo.
+echo [*] 3. Pushing to GitHub...
 git push
 
 echo.
