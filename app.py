@@ -31,7 +31,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v0.1.4.0"
+APP_VERSION = "v0.1.4.1"
 GITHUB_REPO = "cookietank/OpenAuth"
 
 # =========================================================================

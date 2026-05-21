@@ -1,6 +1,5 @@
 import threading
 import time
-import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -11,45 +10,13 @@ except ImportError:
 
 class VirtualYubiKeyPlugin(PluginBase):
     def setup(self):
-        self.hotkey_hook = None
-        threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
-
-    def start_hotkey_listener(self):
-        # 15-second delay ensures Windows CPU settles before hooking
-        if "--tray" in sys.argv:
-            time.sleep(15)
-            
         hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c")
-        self.bind_hotkey(hotkey)
-        
-        # Infinite loop ensures the listener survives if Windows drops the hook
-        while True:
-            try:
-                keyboard.wait()
-            except Exception:
-                time.sleep(2)
+        self.bind_native_hotkey(hotkey, self.execute_hotkey_action)
 
     def config_updated(self):
         """Live Apply: Instantly rebind the hotkey if changed in settings."""
         new_hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "")
-        self.bind_hotkey(new_hotkey)
-
-    def bind_hotkey(self, new_hotkey):
-        if self.hotkey_hook:
-            try:
-                keyboard.remove_hotkey(self.hotkey_hook)
-            except Exception:
-                pass
-            self.hotkey_hook = None
-            
-        if not new_hotkey:
-            return
-            
-        try:
-            self.hotkey_hook = keyboard.add_hotkey(new_hotkey, self.execute_hotkey_action)
-            print(f"Bound Copy Code Macro to: {new_hotkey}")
-        except Exception as e:
-            print(f"Failed to bind hotkey: {e}")
+        self.bind_native_hotkey(new_hotkey, self.execute_hotkey_action)
 
     def show_toast(self, message, duration=2500):
         toast = tk.Toplevel(self.app.root)

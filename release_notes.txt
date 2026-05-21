@@ -1,0 +1,2 @@
+### What's New in v0.1.4.1 
+- Migrated global shortcuts to the native Windows API, permanently fixing the bug where hotkeys would break or disconnect during Remote Desktop (RDP) sessions.

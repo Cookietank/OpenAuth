@@ -1,6 +1,5 @@
 import threading
 import time
-import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -11,45 +10,13 @@ except ImportError:
 
 class AutoLoginPlugin(PluginBase):
     def setup(self):
-        self.hotkey_hook = None
-        threading.Thread(target=self.start_hotkey_listener, daemon=True).start()
-
-    def start_hotkey_listener(self):
-        # 15-second delay ensures Windows CPU settles before hooking
-        if "--tray" in sys.argv:
-            time.sleep(15)
-            
         hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q")
-        self.bind_hotkey(hotkey)
-        
-        # Infinite loop ensures the listener survives if Windows drops the hook
-        while True:
-            try:
-                keyboard.wait()
-            except Exception:
-                time.sleep(2)
+        self.bind_native_hotkey(hotkey, self.execute_automation)
 
     def config_updated(self):
         """Live Apply: Instantly rebind the hotkey if changed in settings."""
         new_hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "")
-        self.bind_hotkey(new_hotkey)
-
-    def bind_hotkey(self, new_hotkey):
-        if self.hotkey_hook:
-            try:
-                keyboard.remove_hotkey(self.hotkey_hook)
-            except Exception:
-                pass
-            self.hotkey_hook = None
-            
-        if not new_hotkey:
-            return
-            
-        try:
-            self.hotkey_hook = keyboard.add_hotkey(new_hotkey, self.execute_automation)
-            print(f"Bound Auto-Login Macro to: {new_hotkey}")
-        except Exception as e:
-            print(f"Failed to bind hotkey: {e}")
+        self.bind_native_hotkey(new_hotkey, self.execute_automation)
 
     def get_target_code(self):
         if self.app.accounts:
@@ -80,7 +47,7 @@ class AutoLoginPlugin(PluginBase):
         self.app.root.after(duration, toast.destroy)
 
     def execute_automation(self):
-        print("\n[AUTO-LOGIN] Sequence Initiated via Keystrokes!")
+        print("\n[AUTO-LOGIN] Sequence Initiated via Native Keystrokes!")
         self.app.root.after(0, self.show_toast, "Triggering Microsoft Auto Login")
         threading.Thread(target=self._run_sequence, daemon=True).start()
 
@@ -89,6 +56,7 @@ class AutoLoginPlugin(PluginBase):
             delay = float(self.app.config.get("hotkeys", {}).get("auto_login_delay", 0.8))
             ways_to_verify = int(self.app.config.get("hotkeys", {}).get("auto_login_ways", 2))
             
+            # Failsafe: release keys in case user is still holding Ctrl/Alt
             keyboard.release('ctrl')
             keyboard.release('alt')
             keyboard.release('shift')
