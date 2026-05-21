@@ -16,22 +16,28 @@ import urllib.error
 import re
 import datetime 
 import shutil 
+import socket
+import struct
+import random
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
 
-# Import all plugins
+# --- Core Plugins (Always Enabled unless CLI flag is passed) ---
 from plugins.qr_scanner import ScreenQRScannerPlugin
 from plugins.manual_entry import ManualEntryPlugin
+from plugins.tray_icon import TrayIconPlugin
+from plugins.tutorial import TutorialPlugin
+
+# --- Toggleable Plugins (Managed in Settings) ---
 from plugins.backup_export import BackupExportPlugin  
 from plugins.secure_storage import SecureStoragePlugin
-from plugins.tray_icon import TrayIconPlugin
 from plugins.broadcaster import LocalBroadcasterPlugin
 from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v0.1.4.1"
+APP_VERSION = "v0.1.5.0"
 GITHUB_REPO = "cookietank/OpenAuth"
 
 # =========================================================================
@@ -63,7 +69,6 @@ if "--uninstall" in sys.argv:
     messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the .exe file.")
     sys.exit(0)
 
-
 APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
 if not os.path.exists(APPDATA_DIR):
     os.makedirs(APPDATA_DIR)
@@ -71,9 +76,6 @@ if not os.path.exists(APPDATA_DIR):
 CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
 LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
-# =========================================================================
-# SYSTEM LOGGER
-# =========================================================================
 class SafeLogger:
     def __init__(self, filename, is_stdout=True):
         self.terminal = sys.stdout if is_stdout else sys.stderr
@@ -108,15 +110,16 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
 
-def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
-AVAILABLE_PLUGINS = {
+# Core plugins are permanently integrated into the app.
+CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
     "Screen QR Scanner": ScreenQRScannerPlugin,
-    "Manual Entry": ManualEntryPlugin, 
+    "Manual Entry": ManualEntryPlugin,
+    "Tutorial": TutorialPlugin
+}
+
+# Toggleable plugins show up in the settings menu.
+TOGGLEABLE_PLUGINS = {
     "Backup & Export": BackupExportPlugin,
     "Copy Code to Clipboard": VirtualYubiKeyPlugin,
     "Auto-Login": AutoLoginPlugin,
@@ -125,9 +128,6 @@ AVAILABLE_PLUGINS = {
 }
 
 PLUGIN_DESCRIPTIONS = {
-    "Tray Icon": "Minimizes OpenAuth silently to the Windows System Tray.",
-    "Screen QR Scanner": "Provisions accounts by grabbing and scanning QR codes directly from your screen.",
-    "Manual Entry": "Allows you to manually add accounts via a Secret Key or URI.", 
     "Backup & Export": "Allows you to securely view and export your raw 2FA secrets to backup in a password manager.",
     "Copy Code to Clipboard": "Provides a global keyboard shortcut to instantly copy (or paste) your primary code.",
     "Auto-Login": "Uses an automated keystroke macro to automatically navigate the Microsoft login screen, pasting the current code and handling login for you.",
@@ -183,11 +183,9 @@ class DesktopAuthenticator:
             "auto_update": True,
             "start_on_boot": False,
             "understood_tray": False,
+            "privacy_mode": True,
             "theme": "Light",
             "plugins": {
-                "Tray Icon": True,
-                "Screen QR Scanner": True,
-                "Manual Entry": True,  
                 "Backup & Export": True,
                 "Copy Code to Clipboard": True,
                 "Auto-Login": True,
@@ -245,10 +243,59 @@ class DesktopAuthenticator:
                 self.manage_startup(True)
                 
             if self.config.get("show_tutorial", True):
-                self.root.after(500, self.start_interactive_tutorial)
+                self.root.after(500, lambda: self.plugin_manager.broadcast('open_tutorial'))
 
         if getattr(sys, 'frozen', False) and self.config.get("auto_update", True):
             threading.Thread(target=self.check_for_updates, daemon=True).start()
+
+        threading.Thread(target=self.check_time_drift, daemon=True).start()
+
+    def get_resource_path(self, relative_path):
+        if hasattr(sys, '_MEIPASS'):
+            return os.path.join(sys._MEIPASS, relative_path)
+        return os.path.join(os.path.abspath("."), relative_path)
+
+    def show_toast(self, message, duration=2500):
+        """Creates a custom, non-blocking floating notification window."""
+        toast = tk.Toplevel(self.root)
+        toast.overrideredirect(True)
+        toast.attributes('-topmost', True)
+        toast.configure(bg="#2d2d2d", bd=1, relief=tk.SOLID)
+        
+        lbl = tk.Label(toast, text=message, fg="white", bg="#2d2d2d", font=("Helvetica", 10), padx=15, pady=10)
+        lbl.pack()
+        
+        self.root.update_idletasks()
+        x = toast.winfo_screenwidth() - toast.winfo_width() - 20
+        y = toast.winfo_screenheight() - toast.winfo_height() - 60
+        toast.geometry(f"+{x}+{y}")
+        
+        self.root.after(duration, toast.destroy)
+
+    def check_time_drift(self):
+        try:
+            client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            client.settimeout(3)
+            client.sendto(b'\x1b' + 47 * b'\0', ('pool.ntp.org', 123))
+            msg, _ = client.recvfrom(1024)
+            ntp_time = struct.unpack("!12I", msg)[10] - 2208988800
+            local_time = time.time()
+            
+            drift = abs(ntp_time - local_time)
+            print(f"[*] System Clock NTP Drift: {drift:.2f} seconds")
+            
+            if drift > 15: 
+                warning_msg = (
+                    "⚠️ CRITICAL WARNING: TIME DRIFT DETECTED ⚠️\n\n"
+                    f"Your Windows clock is out of sync by {drift:.0f} seconds.\n\n"
+                    "2FA codes rely on mathematically perfect timing. If your clock is out of sync, "
+                    "Microsoft and other services will completely REJECT your codes!\n\n"
+                    "Please right-click your Windows clock, go to 'Adjust date/time', "
+                    "and click 'Sync Now' immediately."
+                )
+                self.root.after(0, lambda: messagebox.showwarning("Clock Out of Sync", warning_msg))
+        except Exception as e:
+            print(f"NTP Time check failed or offline: {e}")
 
     def resize_main_window(self):
         self.root.update_idletasks() 
@@ -308,10 +355,7 @@ class DesktopAuthenticator:
             threading.Thread(target=self.perform_update, args=(download_url, asset_name), daemon=True).start()
 
     def perform_update(self, download_url, asset_name):
-        for plugin in self.plugin_manager.plugins:
-            if hasattr(plugin, 'show_toast'):
-                plugin.show_toast("Downloading update... Please wait.", 5000)
-                break
+        self.show_toast("Downloading update... Please wait.", 5000)
                 
         try:
             current_exe = sys.executable
@@ -369,179 +413,8 @@ del "%~f0"
         subprocess.Popen(bat_path, shell=True, env=env, creationflags=0x00000008)
         os._exit(0)
 
-    # =========================================================================
-    # INTERACTIVE TUTORIAL WIZARD
-    # =========================================================================
-    def start_interactive_tutorial(self):
-        self.tut_win = tk.Toplevel(self.root)
-        self.tut_win.title("OpenAuth Setup")
-        self.tut_win.geometry("550x750")
-        self.tut_win.attributes("-topmost", True)
-        self.tut_win.configure(bg=self.colors['bg'])
-        self.tut_step = 0
-        self.tut_images = [] 
-        
-        self.tut_content_frame = tk.Frame(self.tut_win, bg=self.colors['bg'])
-        self.tut_content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-        
-        self.tut_nav_frame = tk.Frame(self.tut_win, bg=self.colors['bg'])
-        self.tut_nav_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=20)
-        
-        self.btn_back = ttk.Button(self.tut_nav_frame, text="< Back", command=self.tut_prev)
-        self.btn_next = ttk.Button(self.tut_nav_frame, text="Next >", command=self.tut_next)
-        
-        self.btn_next.pack(side=tk.RIGHT)
-        self.btn_back.pack(side=tk.LEFT)
-        
-        self.render_tut_step()
-
-    def tut_next(self):
-        if self.tut_step < 7:
-            self.tut_step += 1
-            self.render_tut_step()
-        else:
-            self.tut_win.destroy()
-            
-    def tut_prev(self):
-        if self.tut_step > 0:
-            self.tut_step -= 1
-            self.render_tut_step()
-
-    def _add_tut_img(self, img_name):
-        img_path = get_resource_path(os.path.join('plugins', img_name))
-        if os.path.exists(img_path):
-            try:
-                orig_img = Image.open(img_path)
-                new_size = (orig_img.width * 2, orig_img.height * 2)
-                orig_img = orig_img.resize(new_size, Image.Resampling.LANCZOS)
-                
-                img_canvas = tk.Canvas(self.tut_content_frame, bg=self.colors['bg'], highlightthickness=1, highlightbackground="gray")
-                img_canvas.pack(fill=tk.BOTH, expand=True, pady=10)
-                
-                self.tut_images.append(orig_img)
-                
-                def resize_image(event, canvas=img_canvas, img=orig_img):
-                    canvas.delete("all")
-                    ratio = min(event.width / img.width, event.height / img.height)
-                    if ratio > 1: ratio = 1 
-                    
-                    new_w = max(1, int(img.width * ratio))
-                    new_h = max(1, int(img.height * ratio))
-                    
-                    resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    photo = ImageTk.PhotoImage(resized)
-                    
-                    canvas.image = photo
-                    canvas.create_image(event.width//2, event.height//2, anchor=tk.CENTER, image=photo)
-
-                img_canvas.bind("<Configure>", resize_image)
-            except Exception as e:
-                print(f"Error drawing image: {e}")
-        else:
-            tk.Label(self.tut_content_frame, text=f"[ Missing Image: {img_name} ]", bg=self.colors['bg'], fg="red").pack(pady=10)
-
-    def render_tut_step(self):
-        for widget in self.tut_content_frame.winfo_children():
-            widget.destroy()
-            
-        self.btn_back.config(state="normal" if self.tut_step > 0 else "disabled")
-        self.btn_next.config(text="Finish" if self.tut_step == 7 else "Next >")
-        
-        bg = self.colors['bg']
-        fg = self.colors['fg']
-        
-        # Dynamically fetch configured hotkeys to display in tutorial
-        hk_copy = self.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c").upper()
-        hk_auto = self.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q").upper()
-
-        if self.tut_step == 0:
-            tk.Label(self.tut_content_frame, text="🚀 Welcome to OpenAuth", font=("Helvetica", 18, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Let's get your first account set up.\n\nClick the link below to open your Microsoft Security settings in your web browser. You will need to log in.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            
-            link = tk.Label(self.tut_content_frame, text="🔗 Open: aka.ms/mfasetup", font=("Helvetica", 12, "bold", "underline"), bg=bg, fg="#4da6ff", cursor="hand2")
-            link.pack(pady=20)
-            link.bind("<Button-1>", lambda e: webbrowser.open("https://aka.ms/mfasetup"))
-            
-        elif self.tut_step == 1:
-            tk.Label(self.tut_content_frame, text="Step 1: Add Method", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="On the Microsoft website, click '+ Add sign-in method' and choose 'Microsoft Authenticator' from the options.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            self._add_tut_img('tut_add_method.png')
-            
-        elif self.tut_step == 2:
-            tk.Label(self.tut_content_frame, text="Step 2: Choose Different App", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Click the small blue link that says 'Set up a different authentication app'.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            self._add_tut_img('tut_different_app.png')
-            
-        elif self.tut_step == 3:
-            tk.Label(self.tut_content_frame, text="Step 3: Scan the QR Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible on the screen before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            self._add_tut_img('tut_qr_code.png')
-            
-            def test_scan():
-                for p in self.plugin_manager.plugins:
-                    if isinstance(p, ScreenQRScannerPlugin):
-                        p.scan_screen()
-            ttk.Button(self.tut_content_frame, text="📸 Scan Screen Now", command=test_scan).pack(pady=10)
-            
-        elif self.tut_step == 4:
-            tk.Label(self.tut_content_frame, text="Step 4: Verify the Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Now that OpenAuth is generating 6-digit codes on your desktop, click 'Next' on the Microsoft website.\n\nType the 6-digit code OpenAuth is currently displaying into the Microsoft website to verify the link.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            self._add_tut_img('tut_verify.png')
-            
-        elif self.tut_step == 5:
-            tk.Label(self.tut_content_frame, text="Configuration: Hotkeys", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            
-            desc_text = (
-                "OpenAuth has two powerful keyboard shortcuts you can press anywhere in Windows:\n\n"
-                f"1. Copy Code ({hk_copy}): Instantly copies your code to your clipboard.\n"
-                f"2. Auto-Login ({hk_auto}): A macro that automatically navigates the Microsoft login screen, pasting the current code and handling login for you."
-            )
-            tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            
-            self.auto_paste_tut_var = tk.BooleanVar(value=self.config["hotkeys"].get("auto_paste", False))
-            ttk.Checkbutton(self.tut_content_frame, text="Enable 'Auto-Paste' for the Copy shortcut (injects keystrokes & hits enter)", variable=self.auto_paste_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
-
-        elif self.tut_step == 6:
-            tk.Label(self.tut_content_frame, text="Configuration: Auto-Login", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Login as normal and manually click 'I can't use my Outlook mobile app right now'. You will reach the 'Verify your identity' screen shown below.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=5)
-            self._add_tut_img('tut_waystoverify.png')
-            
-            tk.Label(self.tut_content_frame, text="How many options appear on this screen for you? (App, Text, Call, etc)", bg=bg, fg=fg).pack(anchor="w", pady=(10,0))
-            self.ways_tut_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_ways", 2)))
-            self.create_styled_entry(self.tut_content_frame, self.ways_tut_var).pack(fill=tk.X, pady=5)
-            self.ways_tut_var.trace_add("write", lambda *args: self._tut_save_settings())
-
-            test_desc = f"Once configured, make sure your browser window is active (clicked on), and press your Auto-Login shortcut ({hk_auto}) to run the macro!"
-            tk.Label(self.tut_content_frame, text=test_desc, font=("Helvetica", 10, "italic"), bg=bg, fg="gray", wraplength=450, justify=tk.LEFT).pack(pady=(15,5))
-
-        elif self.tut_step == 7:
-            tk.Label(self.tut_content_frame, text="Ready to Go!", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window, it hides in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
-            
-            self.boot_tut_var = tk.BooleanVar(value=self.config.get("start_on_boot", False))
-            ttk.Checkbutton(self.tut_content_frame, text="Start OpenAuth silently with Windows", variable=self.boot_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
-            
-            tk.Label(self.tut_content_frame, text="You can change all of these settings later by clicking the 'Settings' button in the main app.", justify=tk.LEFT, bg=bg, fg="gray", wraplength=450).pack(pady=20)
-
-    def _tut_save_settings(self):
-        try:
-            if hasattr(self, 'boot_tut_var'):
-                self.config["start_on_boot"] = self.boot_tut_var.get()
-                self.manage_startup(self.boot_tut_var.get())
-            if hasattr(self, 'auto_paste_tut_var'):
-                self.config["hotkeys"]["auto_paste"] = self.auto_paste_tut_var.get()
-            if hasattr(self, 'ways_tut_var'):
-                try:
-                    self.config["hotkeys"]["auto_login_ways"] = int(self.ways_tut_var.get())
-                except ValueError:
-                    pass
-            self.save_config()
-            self.plugin_manager.broadcast('config_updated')
-        except Exception:
-            pass
-
     def get_icon_image(self):
-        icon_path = get_resource_path(os.path.join('plugins', 'icon.ico'))
+        icon_path = self.get_resource_path(os.path.join('plugins', 'icon.ico'))
         if os.path.exists(icon_path):
             return Image.open(icon_path)
             
@@ -618,6 +491,7 @@ del "%~f0"
                     self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
                     self.config["understood_tray"] = saved_config.get("understood_tray", False)
+                    self.config["privacy_mode"] = saved_config.get("privacy_mode", True)
                     self.config["theme"] = saved_config.get("theme", "Light")
                     
                     self.config["plugins"].update(saved_config.get("plugins", {}))
@@ -714,7 +588,6 @@ del "%~f0"
                 sys.stdout.close()
                 sys.stderr.close()
                 
-                import shutil
                 shutil.rmtree(APPDATA_DIR, ignore_errors=True)
                 
                 messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely wiped from your system.\n\nThe application will now close. You can safely delete the .exe file.")
@@ -752,6 +625,9 @@ del "%~f0"
         
         tut_var = tk.BooleanVar(value=self.config.get("show_tutorial", True))
         ttk.Checkbutton(general_frame, text="Show Tutorial on App Updates", variable=tut_var).pack(anchor="w", padx=10, pady=5)
+
+        privacy_var = tk.BooleanVar(value=self.config.get("privacy_mode", True))
+        ttk.Checkbutton(general_frame, text="Privacy Mode (Hide codes until hovered)", variable=privacy_var).pack(anchor="w", padx=10, pady=5)
         
         tk.Label(general_frame, text="App Theme:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 0))
         theme_var = tk.StringVar(value=self.config.get("theme", "Light"))
@@ -761,15 +637,15 @@ del "%~f0"
         
         ttk.Button(general_frame, text="Report an Issue / Bug", command=self.report_issue).pack(anchor="w", padx=10, pady=(5, 0))
 
-        # TAB 2: Plugins & Hotkeys
+        # TAB 2: Automation & Hotkeys
         plugin_frame = ttk.Frame(notebook)
-        notebook.add(plugin_frame, text="Plugins & Hotkeys")
+        notebook.add(plugin_frame, text="Automation & Hotkeys")
         
-        tk.Label(plugin_frame, text="Core Modules", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
+        tk.Label(plugin_frame, text="Optional Modules", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
 
-        core_plugins = ["Tray Icon", "Screen QR Scanner", "Manual Entry", "Copy Code to Clipboard", "Auto-Login"]
-        for name in core_plugins:
-            var = tk.BooleanVar(value=self.config["plugins"].get(name, AVAILABLE_PLUGINS.get(name) is not None))
+        automation_plugins = ["Copy Code to Clipboard", "Auto-Login"]
+        for name in automation_plugins:
+            var = tk.BooleanVar(value=self.config["plugins"].get(name, TOGGLEABLE_PLUGINS.get(name) is not None))
             plugin_vars[name] = var
             chk = ttk.Checkbutton(plugin_frame, text=f"Enable {name}", variable=var)
             chk.pack(anchor="w", padx=10, pady=2)
@@ -803,6 +679,14 @@ del "%~f0"
         notebook.add(adv_frame, text="Advanced")
 
         tk.Label(adv_frame, text="Account Backup", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
+        
+        # Backup & Export is now treated as a toggleable plugin here
+        backup_var = tk.BooleanVar(value=self.config["plugins"].get("Backup & Export", True))
+        plugin_vars["Backup & Export"] = backup_var
+        chk_backup = ttk.Checkbutton(adv_frame, text="Enable Backup & Export", variable=backup_var)
+        chk_backup.pack(anchor="w", padx=10, pady=2)
+        ToolTip(chk_backup, PLUGIN_DESCRIPTIONS.get("Backup & Export", ""))
+        
         ttk.Button(adv_frame, text="Export Accounts / Secret Keys", command=self.trigger_backup_export).pack(fill=tk.X, padx=10, pady=5)
         ttk.Separator(adv_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=10)
 
@@ -846,7 +730,7 @@ del "%~f0"
         btn_frame = tk.Frame(top, bg=self.colors['bg'])
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
 
-        ttk.Button(btn_frame, text="Help / Tutorial", command=self.start_interactive_tutorial).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="Help / Tutorial", command=lambda: self.plugin_manager.broadcast('open_tutorial')).pack(side=tk.LEFT)
 
         def save_and_apply():
             try:
@@ -854,6 +738,7 @@ del "%~f0"
                 self.manage_startup(boot_var.get())
                 self.config["auto_update"] = update_var.get()
                 self.config["show_tutorial"] = tut_var.get()
+                self.config["privacy_mode"] = privacy_var.get()
                 self.config["theme"] = theme_var.get()
                 
                 try:
@@ -906,9 +791,17 @@ del "%~f0"
         os._exit(0)
 
     def load_plugins(self):
-        for name, plugin_class in AVAILABLE_PLUGINS.items():
+        # Load CORE plugins without config checking (unless CLI overrides)
+        for name, plugin_class in CORE_PLUGINS.items():
+            cli_flag = f"--disable-{name.lower().replace(' ', '-')}"
+            if cli_flag not in sys.argv:
+                self.plugin_manager.register_plugin(plugin_class)
+                
+        # Load TOGGLEABLE plugins based on JSON config
+        for name, plugin_class in TOGGLEABLE_PLUGINS.items():
             if self.config["plugins"].get(name, False):
                 self.plugin_manager.register_plugin(plugin_class)
+                
         self.plugin_manager.register_plugin(SecureStoragePlugin)
         self.refresh_ui()
 
@@ -956,22 +849,26 @@ del "%~f0"
         widget.bind("<ButtonRelease-1>", on_release)
         widget.config(cursor="hand2")
 
-    def resize_main_window(self):
-        self.root.update_idletasks() 
-        num_accounts = len(self.accounts)
-        base_height = 50 
-        acc_height = 110 
-        
-        if num_accounts == 0:
-            calc_height = 150
-        else:
-            calc_height = base_height + (min(num_accounts, 3) * acc_height) + 20
+    def animate_code_reveal(self, acc, step):
+        if not getattr(acc, 'is_hovered', False):
+            return
             
-        self.root.geometry(f"500x{calc_height}")
+        if step < 6:
+            scramble = f"{random.randint(100,999)} {random.randint(100,999)}"
+            if hasattr(acc, 'label_ref'):
+                acc.label_ref.config(text=scramble)
+            self.root.after(25, lambda: self.animate_code_reveal(acc, step + 1))
+        else:
+            real_code = acc.get_current_code()
+            formatted = f"{real_code[:3]} {real_code[3:]}"
+            if hasattr(acc, 'label_ref'):
+                acc.label_ref.config(text=formatted)
 
     def refresh_ui(self):
         for widget in self.main_frame.winfo_children():
             widget.destroy()
+
+        privacy_on = self.config.get("privacy_mode", True)
 
         for idx, acc in enumerate(self.accounts):
             bg_color = self.colors['highlight'] if idx == 0 else self.colors['frame_bg']
@@ -990,9 +887,54 @@ del "%~f0"
             del_btn = ttk.Button(header_frame, text="Delete", width=6, command=lambda a=acc: self.remove_account(a))
             del_btn.pack(side=tk.RIGHT)
             
-            code_label = ttk.Label(frame, text=acc.get_current_code(), font=("Helvetica", 24, "bold"), foreground=self.colors['code'], background=bg_color)
+            raw_code = acc.get_current_code()
+            display_text = "••• •••" if privacy_on else f"{raw_code[:3]} {raw_code[3:]}"
+            
+            code_label = ttk.Label(frame, text=display_text, font=("Helvetica", 24, "bold"), foreground=self.colors['code'], background=bg_color, cursor="hand2")
             code_label.pack()
             acc.label_ref = code_label
+            acc.is_hovered = False
+            
+            def copy_code_from_click(event, a=acc):
+                code = a.get_current_code()
+                self.root.clipboard_clear()
+                self.root.clipboard_append(code)
+                self.root.update()
+                self.show_toast(f"Copied to clipboard: {code}")
+
+            code_label.bind("<Button-1>", copy_code_from_click)
+            
+            if privacy_on:
+                def on_enter(event, a=acc):
+                    if not getattr(a, 'is_hovered', False):
+                        a.is_hovered = True
+                        self.animate_code_reveal(a, 0)
+                        
+                def on_leave(event, a=acc, f=frame):
+                    def check_leave():
+                        x, y = self.root.winfo_pointerxy()
+                        widget_under_mouse = self.root.winfo_containing(x, y)
+                        is_inside = False
+                        if widget_under_mouse:
+                            temp = widget_under_mouse
+                            while temp:
+                                if temp == f:
+                                    is_inside = True
+                                    break
+                                temp = temp.master
+                        
+                        if not is_inside:
+                            a.is_hovered = False
+                            if hasattr(a, 'label_ref'):
+                                a.label_ref.config(text="••• •••")
+                                
+                    self.root.after(50, check_leave)
+
+                frame.bind("<Enter>", on_enter)
+                frame.bind("<Leave>", on_leave)
+                for child in frame.winfo_children():
+                    child.bind("<Enter>", on_enter)
+                    child.bind("<Leave>", on_leave)
             
             if idx == 0:
                 tk.Label(frame, text="★ PRIMARY ACCOUNT", font=("Helvetica", 8, "bold"), fg=self.colors['primary_text'], bg=bg_color).pack()
@@ -1006,6 +948,7 @@ del "%~f0"
         if self.accounts:
             time_remaining = self.accounts[0].get_time_remaining()
             self.root.title(f"OpenAuth ({time_remaining}s)")
+            privacy_on = self.config.get("privacy_mode", True)
             
             code_changed = False
             for acc in self.accounts:
@@ -1014,7 +957,12 @@ del "%~f0"
                 
                 if new_code != old_code:
                     if hasattr(acc, 'label_ref'):
-                        acc.label_ref.config(text=new_code)
+                        if not privacy_on or getattr(acc, 'is_hovered', False):
+                            formatted = f"{new_code[:3]} {new_code[3:]}"
+                            acc.label_ref.config(text=formatted)
+                        elif privacy_on and not getattr(acc, 'is_hovered', False):
+                            acc.label_ref.config(text="••• •••")
+                            
                     acc.last_code = new_code
                     code_changed = True
             if code_changed:

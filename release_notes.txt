@@ -1,0 +1,20 @@
+### What's New in v0.1.5.0 
+🌟 Major Features
+
+    Privacy Mode (Enabled by Default): To prevent accidental leaks while screen-sharing on Zoom or Teams, your 6-digit codes are now safely hidden behind dots (••• •••) by default.
+
+    Matrix Decrypt Animation: Hovering your mouse over an account card now triggers a slick, high-fps "hacker-style" decryption animation that rapidly rolls through random numbers before snapping smoothly to your real code.
+
+    NTP Time-Drift Protection: OpenAuth now silently pings pool.ntp.org in the background when it boots. If it detects your Windows system clock has drifted and is out-of-sync, it instantly warns you so you can fix it before your Microsoft codes start failing!
+
+🎨 UI & UX Improvements
+
+    1-Click Copy: You can now simply click directly on the 6-digit code in the main app window to instantly copy it to your clipboard. A new visual toast notification confirms the copy was successful!
+
+    Streamlined Settings Menu: We reduced the clutter for standard users by separating plugins into "Core" and "Optional" modules. Essential tools (like the QR Scanner, Tray Icon, and Manual Entry) are now permanently enabled and hidden from the toggle list so they can't be accidentally broken.
+
+🔧 Architecture & Under the Hood
+
+    App Containerization: We successfully decoupled the massive Interactive Setup Wizard from the main application, containerizing it into its own lightweight tutorial.py plugin.
+
+    CLI Overrides: Power users and system admins can now use command-line flags (like --disable-qr-scanner or --disable-tray-icon) to forcefully bypass core plugins on boot if desired.
