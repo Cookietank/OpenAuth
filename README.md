@@ -38,6 +38,18 @@ OpenAuth is a portable application. It requires **no installation** and **no Pyt
 
 ---
 
+## 🗺️ Development Roadmap
+
+We are actively building out OpenAuth to be the ultimate 2FA ecosystem. Here is what is currently planned for future releases:
+
+- [ ] **NTP Time-Drift Protection:** Automatic system clock validation on startup to prevent failing codes caused by out-of-sync Windows clocks.
+- [ ] **Privacy Blur Mode:** A UI toggle to hide TOTP codes behind a blur effect by default—perfect for preventing leaks when screen-sharing on Zoom or Teams.
+- [ ] **Authy & Google Authenticator Importer:** Easy 1-click migration for users looking for an alternative following the discontinuation of Authy Desktop.
+- [ ] **Zero-Touch Browser Extension:** A lightweight Chrome/Firefox companion extension that detects Microsoft login pages, talks to the OpenAuth local API, and injects the 6-digit code instantly without keyboard macros.
+- [ ] **macOS Version:** Full cross-platform compatibility with native Keychain secure storage and Apple Silicon support.
+
+---
+
 ## 🧩 Module Documentation
 
 OpenAuth's functionality is split into modules. You can enable or disable them instantly via the **Settings** menu.
