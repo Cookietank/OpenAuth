@@ -1,13 +1,15 @@
 <div align="center">
 
 # 🛡️ OpenAuth
-**The Modular Desktop Authenticator for Windows**
+**A Modular Desktop Authenticator for Windows**
 
 [![OS](https://img.shields.io/badge/OS-Windows_10%20%7C_11-blue?style=flat-square&logo=windows)](https://github.com/cookietank/OpenAuth)
 [![Python](https://img.shields.io/badge/Python-3.10+-yellow?style=flat-square&logo=python)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/Status-Beta-success?style=flat-square)]()
 
-OpenAuth is a lightning-fast, edge-computed desktop 2FA/MFA authenticator. Designed for power users and enterprise workflows, it deeply integrates into Windows to bypass the friction of constantly checking your phone for TOTP codes.
+OpenAuth is a lightning-fast, desktop 2FA/MFA authenticator. Designed for users of Microsoft enterprise services, it deeply integrates into Windows to bypass the friction of constantly checking your phone for TOTP codes - incredibly useful for organisations that require frequent 2fa!
+
+Click below for the latest version, then follow the tutorial to setup!
 
 [Download Latest Release](../../releases) • [Report a Bug](../../issues) • [Request a Feature](../../issues)
 
@@ -30,10 +32,10 @@ OpenAuth is a portable application. It requires **no installation** and **no Pyt
 
 ## ✨ Core Features
 
-* 🔒 **Zero-Trust Secure Storage:** Your MFA secrets are never written to plain text. OpenAuth securely encrypts and stores them directly in the native Windows Credential Vault.
-* ☁️ **Over-The-Air (OTA) Updates:** OpenAuth silently checks GitHub for updates and seamlessly hot-swaps itself to the latest version.
-* 📉 **System Tray & Startup:** Runs silently in the background consuming <30MB of RAM.
-* 🌗 **Live Themes:** Instantly toggle between Light and Dark mode.
+* 🔒 **Zero-Trust Secure Storage:** Your MFA secrets are never written to plain text. OpenAuth encrypts and stores them directly in the native Windows Credential Vault.
+* ☁️ **Automatic Updates:** OpenAuth checks GitHub for updates and hot-swaps itself to the latest version.
+* 📉 **System Tray & Startup:** Automatic startup and easy access from the system tray.
+* 🪶 **Lightweight** Runs silently in the background consuming <50MB of RAM.
 * 🎒 **Data Portability:** Securely backup and export your raw 2FA URIs at any time.
 
 ---
@@ -42,11 +44,11 @@ OpenAuth is a portable application. It requires **no installation** and **no Pyt
 
 We are actively building out OpenAuth to be the ultimate 2FA ecosystem. Here is what is currently planned for future releases:
 
+- [ ] **PRIORITY! macOS Version:** Full cross-platform compatibility with native Keychain secure storage and Apple Silicon support.
 - [x] **NTP Time-Drift Protection:** Automatic system clock validation on startup to prevent failing codes caused by out-of-sync Windows clocks.
 - [x] **Privacy Blur Mode:** A UI toggle to hide TOTP codes behind a blur effect by default—perfect for preventing leaks when screen-sharing on Zoom or Teams.
 - [ ] **Authy & Google Authenticator Importer:** Easy 1-click migration for users looking for an alternative following the discontinuation of Authy Desktop.
 - [ ] **Zero-Touch Browser Extension:** A lightweight Chrome/Firefox companion extension that detects Microsoft login pages, talks to the OpenAuth local API, and injects the 6-digit code instantly without keyboard macros.
-- [ ] **macOS Version:** Full cross-platform compatibility with native Keychain secure storage and Apple Silicon support.
 
 ---
 
