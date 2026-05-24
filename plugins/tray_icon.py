@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
 import sys
 import pystray
@@ -7,49 +6,15 @@ from plugin_manager import PluginBase
 
 class TrayIconPlugin(PluginBase):
     def setup(self):
-        self.to_tray_btn = None
+        # Permanently add the To Tray button (no more popup)
+        self.app.add_toolbar_action("To Tray", self.minimize_to_tray, side=tk.RIGHT)
         
-        if not self.app.config.get("understood_tray", False):
-            self.to_tray_btn = self.app.add_toolbar_action("To Tray", self.tray_tutorial_click, side=tk.RIGHT)
-        
-        self.app.root.bind("<Unmap>", self.on_unmap)
-        
+        # If booted silently, go straight to tray
         if "--tray" in sys.argv:
             self.app.root.after(100, self.minimize_to_tray)
 
-    def tray_tutorial_click(self):
-        tut = tk.Toplevel(self.app.root)
-        tut.title("System Tray")
-        tut.geometry("380x250")
-        tut.attributes("-topmost", True)
-        tut.configure(bg=self.app.colors['bg'])
-        
-        tk.Label(tut, text="ℹ️ Hiding in the Tray", font=("Helvetica", 12, "bold"), bg=self.app.colors['bg'], fg=self.app.colors['fg']).pack(pady=15)
-        
-        msg = "OpenAuth is designed to run silently in the background.\n\nIt minimizes to your Windows System Tray (the small icons near your clock in the bottom right of your screen).\n\nPro Tip: The standard Windows Minimize (-) button does the exact same thing!"
-        tk.Message(tut, text=msg, bg=self.app.colors['bg'], fg=self.app.colors['fg'], width=340, justify=tk.LEFT).pack(padx=20, pady=5)
-        
-        understand_var = tk.BooleanVar(value=True)
-        chk = ttk.Checkbutton(tut, text="I understand, remove this 'To Tray' button", variable=understand_var)
-        chk.pack(pady=10)
-        
-        def proceed():
-            if understand_var.get():
-                self.app.config["understood_tray"] = True
-                self.app.save_config()
-                if self.to_tray_btn:
-                    self.to_tray_btn.pack_forget()
-                    self.to_tray_btn.destroy()
-            tut.destroy()
-            self.minimize_to_tray()
-
-        ttk.Button(tut, text="Got it!", command=proceed).pack(pady=10)
-
-    def on_unmap(self, event):
-        if event.widget == self.app.root and self.app.root.state() == 'iconic':
-            self.minimize_to_tray()
-
     def minimize_to_tray(self, event=None):
+        """Hides the app to the System Tray."""
         for widget in self.app.root.winfo_children():
             if isinstance(widget, tk.Toplevel):
                 widget.destroy()
@@ -84,10 +49,10 @@ class TrayIconPlugin(PluginBase):
 
     def restore_from_tray(self, icon, item):
         self.icon.stop() 
-        # SNAP TO FIT: Resize the window mathematically before restoring it!
         self.app.root.after(0, self.app.resize_main_window)
         self.app.root.after(0, self.app.root.deiconify) 
 
     def quit_from_tray(self, icon, item):
         self.icon.stop()
-        self.app.root.after(0, self.app.quit_app)
+        # Force quit directly without the confirmation popup, since tray quits are explicit
+        self.app.root.after(0, self.app.force_quit_app)

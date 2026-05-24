@@ -10,7 +10,6 @@ class TutorialPlugin(PluginBase):
         pass
 
     def open_tutorial(self):
-        """Event hook called by app.py when a user clicks Help/Tutorial."""
         self.start_interactive_tutorial()
 
     def start_interactive_tutorial(self):
@@ -63,6 +62,7 @@ class TutorialPlugin(PluginBase):
                 
                 def resize_image(event, canvas=img_canvas, img=orig_img):
                     canvas.delete("all")
+                    if event.width <= 1 or event.height <= 1: return
                     ratio = min(event.width / img.width, event.height / img.height)
                     if ratio > 1: ratio = 1 
                     
@@ -80,6 +80,49 @@ class TutorialPlugin(PluginBase):
                 print(f"Error drawing image: {e}")
         else:
             tk.Label(self.tut_content_frame, text=f"[ Missing Image: {img_name} ]", bg=self.app.colors['bg'], fg="red").pack(pady=10)
+
+    def _add_tut_imgs_side_by_side(self, img_names):
+        """Renders multiple images side-by-side responsively."""
+        frame = tk.Frame(self.tut_content_frame, bg=self.app.colors['bg'])
+        frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        for img_name in img_names:
+            img_path = self.app.get_resource_path(os.path.join('plugins', img_name))
+            if os.path.exists(img_path):
+                try:
+                    orig_img = Image.open(img_path)
+                    new_size = (orig_img.width * 2, orig_img.height * 2)
+                    orig_img = orig_img.resize(new_size, Image.Resampling.LANCZOS)
+
+                    img_canvas = tk.Canvas(frame, bg=self.app.colors['bg'], highlightthickness=1, highlightbackground="gray")
+                    img_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+                    self.tut_images.append(orig_img)
+
+                    # CRITICAL FIX: Isolated Closure for each individual Canvas
+                    def make_resize_handler(c, i):
+                        def handler(event):
+                            c.delete("all")
+                            if event.width <= 1 or event.height <= 1: return
+                            ratio = min(event.width / i.width, event.height / i.height)
+                            if ratio > 1: ratio = 1
+
+                            new_w = max(1, int(i.width * ratio))
+                            new_h = max(1, int(i.height * ratio))
+
+                            resized = i.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                            photo = ImageTk.PhotoImage(resized)
+
+                            c.image = photo
+                            c.create_image(event.width//2, event.height//2, anchor=tk.CENTER, image=photo)
+                        return handler
+
+                    img_canvas.bind("<Configure>", make_resize_handler(img_canvas, orig_img))
+
+                except Exception as e:
+                    print(f"Error drawing image: {e}")
+            else:
+                tk.Label(frame, text=f"[ Missing: {img_name} ]", bg=self.app.colors['bg'], fg="red").pack(side=tk.LEFT, padx=5, expand=True)
 
     def render_tut_step(self):
         for widget in self.tut_content_frame.winfo_children():
@@ -145,7 +188,8 @@ class TutorialPlugin(PluginBase):
         elif self.tut_step == 6:
             tk.Label(self.tut_content_frame, text="Configuration: Auto-Login", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
             tk.Label(self.tut_content_frame, text="Login as normal and manually click 'I can't use my Outlook mobile app right now'. You will reach the 'Verify your identity' screen shown below.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=5)
-            self._add_tut_img('tut_waystoverify.png')
+            
+            self._add_tut_imgs_side_by_side(['tut_waystoverify.png', 'tut_waystoverify_3.png'])
             
             tk.Label(self.tut_content_frame, text="How many options appear on this screen for you? (App, Text, Call, etc)", bg=bg, fg=fg).pack(anchor="w", pady=(10,0))
             self.ways_tut_var = tk.StringVar(value=str(self.app.config["hotkeys"].get("auto_login_ways", 2)))
@@ -157,7 +201,7 @@ class TutorialPlugin(PluginBase):
 
         elif self.tut_step == 7:
             tk.Label(self.tut_content_frame, text="Ready to Go!", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window, it hides in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window using the 'X', it will hide in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
             
             self.boot_tut_var = tk.BooleanVar(value=self.app.config.get("start_on_boot", False))
             ttk.Checkbutton(self.tut_content_frame, text="Start OpenAuth silently with Windows", variable=self.boot_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")

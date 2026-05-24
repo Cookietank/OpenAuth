@@ -23,13 +23,13 @@ from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
 
-# --- Core Plugins (Always Enabled unless CLI flag is passed) ---
+# --- Core Plugins ---
 from plugins.qr_scanner import ScreenQRScannerPlugin
 from plugins.manual_entry import ManualEntryPlugin
 from plugins.tray_icon import TrayIconPlugin
 from plugins.tutorial import TutorialPlugin
 
-# --- Toggleable Plugins (Managed in Settings) ---
+# --- Toggleable Plugins ---
 from plugins.backup_export import BackupExportPlugin  
 from plugins.secure_storage import SecureStoragePlugin
 from plugins.broadcaster import LocalBroadcasterPlugin
@@ -37,12 +37,9 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v0.1.5.0"
+APP_VERSION = "v0.1.5.1"
 GITHUB_REPO = "cookietank/OpenAuth"
 
-# =========================================================================
-# SILENT COMMAND-LINE UNINSTALLER
-# =========================================================================
 if "--uninstall" in sys.argv:
     try:
         import keyring
@@ -110,7 +107,6 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
 
-# Core plugins are permanently integrated into the app.
 CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
     "Screen QR Scanner": ScreenQRScannerPlugin,
@@ -118,7 +114,6 @@ CORE_PLUGINS = {
     "Tutorial": TutorialPlugin
 }
 
-# Toggleable plugins show up in the settings menu.
 TOGGLEABLE_PLUGINS = {
     "Backup & Export": BackupExportPlugin,
     "Copy Code to Clipboard": VirtualYubiKeyPlugin,
@@ -182,9 +177,8 @@ class DesktopAuthenticator:
             "show_tutorial": True,
             "auto_update": True,
             "start_on_boot": False,
-            "understood_tray": False,
-            "privacy_mode": True,
-            "theme": "Light",
+            "privacy_mode": False, # Changed default to False
+            "theme": "Automatic",  # Changed default to Automatic
             "plugins": {
                 "Backup & Export": True,
                 "Copy Code to Clipboard": True,
@@ -213,7 +207,8 @@ class DesktopAuthenticator:
         except Exception:
             pass
 
-        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+        # Clicking the 'X' now sends the app to the Tray instead of quitting
+        self.root.protocol("WM_DELETE_WINDOW", self.send_to_tray)
         
         self.toolbar = tk.Frame(root, bd=1, relief=tk.RAISED, bg=self.colors['bg'])
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
@@ -223,7 +218,7 @@ class DesktopAuthenticator:
         self.auth_menu_btn.configure(menu=self.auth_menu)
         self.auth_menu_btn.pack(side=tk.LEFT, padx=5, pady=2)
 
-        self.add_toolbar_action("Quit", self.quit_app, side=tk.RIGHT)
+        self.add_toolbar_action("Quit", self.quit_app_prompt, side=tk.RIGHT)
         self.add_toolbar_action("Settings", self.open_settings, side=tk.RIGHT)
         
         self.main_frame = tk.Frame(root, bg=self.colors['bg'])
@@ -250,13 +245,41 @@ class DesktopAuthenticator:
 
         threading.Thread(target=self.check_time_drift, daemon=True).start()
 
+    def get_windows_theme(self):
+        """Reads the Windows Registry to determine if OS is Light or Dark mode."""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return "Light" if val == 1 else "Dark"
+        except Exception:
+            return "Light" 
+
+    def send_to_tray(self):
+        """Called when the 'X' button is clicked."""
+        for p in self.plugin_manager.plugins:
+            if type(p).__name__ == "TrayIconPlugin":
+                p.minimize_to_tray()
+                return
+        self.force_quit_app()
+
+    def quit_app_prompt(self):
+        """Called from the Toolbar 'Quit' button with a safety warning."""
+        if messagebox.askyesno("Quit OpenAuth", "Are you sure you want to quit OpenAuth?\n\nYou will not be able to use Hotkeys or Auto-Login while the application is closed.", parent=self.root):
+            self.force_quit_app()
+
+    def force_quit_app(self):
+        """Instantly kills the app (Used by Tray Icon and internal shutdown hooks)."""
+        if self.update_job is not None:
+            self.root.after_cancel(self.update_job)
+        self.root.destroy()
+        os._exit(0)
+
     def get_resource_path(self, relative_path):
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
 
     def show_toast(self, message, duration=2500):
-        """Creates a custom, non-blocking floating notification window."""
         toast = tk.Toplevel(self.root)
         toast.overrideredirect(True)
         toast.attributes('-topmost', True)
@@ -426,7 +449,14 @@ del "%~f0"
         return image
 
     def apply_theme_colors(self):
-        is_dark = self.config.get("theme", "Light") == "Dark"
+        theme_setting = self.config.get("theme", "Automatic")
+        if theme_setting == "Automatic":
+            theme_choice = self.get_windows_theme()
+        else:
+            theme_choice = theme_setting
+            
+        is_dark = theme_choice == "Dark"
+        
         self.colors = {
             "bg": "#1e1e1e" if is_dark else "SystemButtonFace",
             "fg": "#ffffff" if is_dark else "black",
@@ -490,9 +520,8 @@ del "%~f0"
                     self.config["show_tutorial"] = saved_config.get("show_tutorial", True)
                     self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
-                    self.config["understood_tray"] = saved_config.get("understood_tray", False)
-                    self.config["privacy_mode"] = saved_config.get("privacy_mode", True)
-                    self.config["theme"] = saved_config.get("theme", "Light")
+                    self.config["privacy_mode"] = saved_config.get("privacy_mode", False)
+                    self.config["theme"] = saved_config.get("theme", "Automatic")
                     
                     self.config["plugins"].update(saved_config.get("plugins", {}))
                     self.config["hotkeys"].update(saved_config.get("hotkeys", {}))
@@ -626,20 +655,20 @@ del "%~f0"
         tut_var = tk.BooleanVar(value=self.config.get("show_tutorial", True))
         ttk.Checkbutton(general_frame, text="Show Tutorial on App Updates", variable=tut_var).pack(anchor="w", padx=10, pady=5)
 
-        privacy_var = tk.BooleanVar(value=self.config.get("privacy_mode", True))
+        privacy_var = tk.BooleanVar(value=self.config.get("privacy_mode", False))
         ttk.Checkbutton(general_frame, text="Privacy Mode (Hide codes until hovered)", variable=privacy_var).pack(anchor="w", padx=10, pady=5)
         
         tk.Label(general_frame, text="App Theme:", bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 0))
-        theme_var = tk.StringVar(value=self.config.get("theme", "Light"))
-        ttk.Combobox(general_frame, textvariable=theme_var, values=["Light", "Dark"], state="readonly").pack(fill=tk.X, padx=10, pady=5)
+        theme_var = tk.StringVar(value=self.config.get("theme", "Automatic"))
+        ttk.Combobox(general_frame, textvariable=theme_var, values=["Automatic", "Light", "Dark"], state="readonly").pack(fill=tk.X, padx=10, pady=5)
         
         tk.Label(general_frame, text=f"OpenAuth Version: {APP_VERSION}", bg=self.colors['bg'], fg=self.colors['handle']).pack(anchor="w", padx=10, pady=(30, 0))
         
         ttk.Button(general_frame, text="Report an Issue / Bug", command=self.report_issue).pack(anchor="w", padx=10, pady=(5, 0))
 
-        # TAB 2: Automation & Hotkeys
+        # TAB 2: Plugins & Hotkeys
         plugin_frame = ttk.Frame(notebook)
-        notebook.add(plugin_frame, text="Automation & Hotkeys")
+        notebook.add(plugin_frame, text="Plugins & Hotkeys")
         
         tk.Label(plugin_frame, text="Optional Modules", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
 
@@ -680,7 +709,6 @@ del "%~f0"
 
         tk.Label(adv_frame, text="Account Backup", font=("Helvetica", 9, "bold"), bg=self.colors['bg'], fg=self.colors['fg']).pack(anchor="w", padx=10, pady=(10, 2))
         
-        # Backup & Export is now treated as a toggleable plugin here
         backup_var = tk.BooleanVar(value=self.config["plugins"].get("Backup & Export", True))
         plugin_vars["Backup & Export"] = backup_var
         chk_backup = ttk.Checkbutton(adv_frame, text="Enable Backup & Export", variable=backup_var)
@@ -791,13 +819,11 @@ del "%~f0"
         os._exit(0)
 
     def load_plugins(self):
-        # Load CORE plugins without config checking (unless CLI overrides)
         for name, plugin_class in CORE_PLUGINS.items():
             cli_flag = f"--disable-{name.lower().replace(' ', '-')}"
             if cli_flag not in sys.argv:
                 self.plugin_manager.register_plugin(plugin_class)
                 
-        # Load TOGGLEABLE plugins based on JSON config
         for name, plugin_class in TOGGLEABLE_PLUGINS.items():
             if self.config["plugins"].get(name, False):
                 self.plugin_manager.register_plugin(plugin_class)
@@ -868,7 +894,7 @@ del "%~f0"
         for widget in self.main_frame.winfo_children():
             widget.destroy()
 
-        privacy_on = self.config.get("privacy_mode", True)
+        privacy_on = self.config.get("privacy_mode", False)
 
         for idx, acc in enumerate(self.accounts):
             bg_color = self.colors['highlight'] if idx == 0 else self.colors['frame_bg']
@@ -948,7 +974,7 @@ del "%~f0"
         if self.accounts:
             time_remaining = self.accounts[0].get_time_remaining()
             self.root.title(f"OpenAuth ({time_remaining}s)")
-            privacy_on = self.config.get("privacy_mode", True)
+            privacy_on = self.config.get("privacy_mode", False)
             
             code_changed = False
             for acc in self.accounts:

@@ -1,0 +1,8 @@
+### What's New in v0.1.5.1 
+🌟 Features
+- Automatic OS Theming: OpenAuth now natively reads your Windows Registry on boot to automatically match your system's Light or Dark mode preference. (You can still force a specific theme in settings).
+
+🎨 UI & UX Improvements
+- Native Window Controls: The standard Windows minimize (-) button now properly minimizes the app to the taskbar, while clicking the Close (X) button cleanly hides the app into the System Tray.
+- Safer Quitting: Clicking "Quit" in the main toolbar now prompts a safety confirmation to prevent accidentally killing your hotkey listeners. (Quitting from the System Tray remains instant).
+- Side-by-Side Tutorial Rendering: The interactive setup wizard now features a dynamic grid renderer, allowing it to display multiple responsive screenshots side-by-side (perfect for comparing the different "Ways to Verify" Microsoft screens).
