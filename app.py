@@ -37,7 +37,7 @@ from plugins.auto_login import AutoLoginPlugin
 from plugins.virtual_yubikey import VirtualYubiKeyPlugin
 from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v0.1.5.1"
+APP_VERSION = "v0.1.5.2"
 GITHUB_REPO = "cookietank/OpenAuth"
 
 if "--uninstall" in sys.argv:
@@ -690,7 +690,7 @@ del "%~f0"
             self.create_styled_entry(plugin_frame, var).pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
 
         auto_paste_var = tk.BooleanVar(value=self.config["hotkeys"].get("auto_paste", False))
-        ap_chk = ttk.Checkbutton(plugin_frame, text="Auto-Paste Code (Inject Keystrokes & Press Enter)", variable=auto_paste_var)
+        ap_chk = ttk.Checkbutton(plugin_frame, text="Direct Type Mode (Instantly types the code & presses Enter instead of copying)", variable=auto_paste_var)
         ap_chk.pack(anchor="w", padx=10, pady=(5, 0))
 
         delay_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_delay", 0.8)))

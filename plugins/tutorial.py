@@ -15,17 +15,17 @@ class TutorialPlugin(PluginBase):
     def start_interactive_tutorial(self):
         self.tut_win = tk.Toplevel(self.app.root)
         self.tut_win.title("OpenAuth Setup")
-        self.tut_win.geometry("550x750")
         self.tut_win.attributes("-topmost", True)
         self.tut_win.configure(bg=self.app.colors['bg'])
         self.tut_step = 0
         self.tut_images = [] 
+        self.tut_animations = [] 
         
         self.tut_content_frame = tk.Frame(self.tut_win, bg=self.app.colors['bg'])
         self.tut_content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         self.tut_nav_frame = tk.Frame(self.tut_win, bg=self.app.colors['bg'])
-        self.tut_nav_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=20)
+        self.tut_nav_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=10)
         
         self.btn_back = ttk.Button(self.tut_nav_frame, text="< Back", command=self.tut_prev)
         self.btn_next = ttk.Button(self.tut_nav_frame, text="Next >", command=self.tut_next)
@@ -36,10 +36,11 @@ class TutorialPlugin(PluginBase):
         self.render_tut_step()
 
     def tut_next(self):
-        if self.tut_step < 7:
+        if self.tut_step < 8:  # Extended to handle 8 steps now
             self.tut_step += 1
             self.render_tut_step()
         else:
+            self.clear_animations()
             self.tut_win.destroy()
             
     def tut_prev(self):
@@ -47,15 +48,24 @@ class TutorialPlugin(PluginBase):
             self.tut_step -= 1
             self.render_tut_step()
 
-    def _add_tut_img(self, img_name):
+    def clear_animations(self):
+        for anim in self.tut_animations:
+            self.app.root.after_cancel(anim)
+        self.tut_animations.clear()
+
+    def _add_tut_img(self, img_name, target_width=480):
         img_path = self.app.get_resource_path(os.path.join('plugins', img_name))
         if os.path.exists(img_path):
             try:
                 orig_img = Image.open(img_path)
-                new_size = (orig_img.width * 2, orig_img.height * 2)
-                orig_img = orig_img.resize(new_size, Image.Resampling.LANCZOS)
                 
-                img_canvas = tk.Canvas(self.tut_content_frame, bg=self.app.colors['bg'], highlightthickness=1, highlightbackground="gray")
+                ratio = target_width / float(orig_img.width)
+                init_height = int(orig_img.height * ratio)
+
+                hires_size = (orig_img.width * 2, orig_img.height * 2)
+                orig_img = orig_img.resize(hires_size, Image.Resampling.LANCZOS)
+                
+                img_canvas = tk.Canvas(self.tut_content_frame, bg=self.app.colors['bg'], width=target_width, height=init_height, highlightthickness=1, highlightbackground="gray")
                 img_canvas.pack(fill=tk.BOTH, expand=True, pady=10)
                 
                 self.tut_images.append(orig_img)
@@ -63,11 +73,12 @@ class TutorialPlugin(PluginBase):
                 def resize_image(event, canvas=img_canvas, img=orig_img):
                     canvas.delete("all")
                     if event.width <= 1 or event.height <= 1: return
-                    ratio = min(event.width / img.width, event.height / img.height)
-                    if ratio > 1: ratio = 1 
                     
-                    new_w = max(1, int(img.width * ratio))
-                    new_h = max(1, int(img.height * ratio))
+                    r = min(event.width / img.width, event.height / img.height)
+                    if r > 1: r = 1 
+                    
+                    new_w = max(1, int(img.width * r))
+                    new_h = max(1, int(img.height * r))
                     
                     resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                     photo = ImageTk.PhotoImage(resized)
@@ -81,34 +92,76 @@ class TutorialPlugin(PluginBase):
         else:
             tk.Label(self.tut_content_frame, text=f"[ Missing Image: {img_name} ]", bg=self.app.colors['bg'], fg="red").pack(pady=10)
 
+    def _add_tut_gif(self, gif_name, target_width=480):
+        gif_path = self.app.get_resource_path(os.path.join('plugins', gif_name))
+        if os.path.exists(gif_path):
+            try:
+                img = Image.open(gif_path)
+                frames = []
+                
+                ratio = target_width / float(img.width)
+                target_height = int(img.height * ratio)
+                
+                try:
+                    while True:
+                        frame = img.copy().convert('RGBA')
+                        frame = frame.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                        frames.append(ImageTk.PhotoImage(frame))
+                        img.seek(len(frames)) 
+                except EOFError:
+                    pass 
+                
+                if frames:
+                    lbl = tk.Label(self.tut_content_frame, image=frames[0], bg=self.app.colors['bg'], borderwidth=1, relief="solid")
+                    lbl.pack(pady=5)
+                    self.tut_images.extend(frames) 
+                    
+                    def update_frame(idx):
+                        if not lbl.winfo_exists(): return
+                        lbl.config(image=frames[idx])
+                        next_idx = (idx + 1) % len(frames)
+                        delay = img.info.get('duration', 100) 
+                        if delay == 0: delay = 100
+                        anim_id = self.app.root.after(delay, update_frame, next_idx)
+                        self.tut_animations.append(anim_id)
+                        
+                    update_frame(0)
+            except Exception as e:
+                print(f"Error loading GIF: {e}")
+        else:
+            tk.Label(self.tut_content_frame, text=f"[ Missing GIF: {gif_name} ]", bg=self.app.colors['bg'], fg="red").pack(pady=10)
+
     def _add_tut_imgs_side_by_side(self, img_names):
-        """Renders multiple images side-by-side responsively."""
         frame = tk.Frame(self.tut_content_frame, bg=self.app.colors['bg'])
-        frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         for img_name in img_names:
             img_path = self.app.get_resource_path(os.path.join('plugins', img_name))
             if os.path.exists(img_path):
                 try:
                     orig_img = Image.open(img_path)
-                    new_size = (orig_img.width * 2, orig_img.height * 2)
-                    orig_img = orig_img.resize(new_size, Image.Resampling.LANCZOS)
+                    
+                    target_width = 230
+                    ratio = target_width / float(orig_img.width)
+                    init_height = int(orig_img.height * ratio)
 
-                    img_canvas = tk.Canvas(frame, bg=self.app.colors['bg'], highlightthickness=1, highlightbackground="gray")
+                    hires_size = (orig_img.width * 2, orig_img.height * 2)
+                    orig_img = orig_img.resize(hires_size, Image.Resampling.LANCZOS)
+
+                    img_canvas = tk.Canvas(frame, bg=self.app.colors['bg'], width=target_width, height=init_height, highlightthickness=1, highlightbackground="gray")
                     img_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
                     self.tut_images.append(orig_img)
 
-                    # CRITICAL FIX: Isolated Closure for each individual Canvas
                     def make_resize_handler(c, i):
                         def handler(event):
                             c.delete("all")
                             if event.width <= 1 or event.height <= 1: return
-                            ratio = min(event.width / i.width, event.height / i.height)
-                            if ratio > 1: ratio = 1
+                            r = min(event.width / i.width, event.height / i.height)
+                            if r > 1: r = 1
 
-                            new_w = max(1, int(i.width * ratio))
-                            new_h = max(1, int(i.height * ratio))
+                            new_w = max(1, int(i.width * r))
+                            new_h = max(1, int(i.height * r))
 
                             resized = i.resize((new_w, new_h), Image.Resampling.LANCZOS)
                             photo = ImageTk.PhotoImage(resized)
@@ -125,11 +178,13 @@ class TutorialPlugin(PluginBase):
                 tk.Label(frame, text=f"[ Missing: {img_name} ]", bg=self.app.colors['bg'], fg="red").pack(side=tk.LEFT, padx=5, expand=True)
 
     def render_tut_step(self):
+        self.clear_animations()
+        
         for widget in self.tut_content_frame.winfo_children():
             widget.destroy()
             
         self.btn_back.config(state="normal" if self.tut_step > 0 else "disabled")
-        self.btn_next.config(text="Finish" if self.tut_step == 7 else "Next >")
+        self.btn_next.config(text="Finish" if self.tut_step == 8 else "Next >")
         
         bg = self.app.colors['bg']
         fg = self.app.colors['fg']
@@ -139,7 +194,7 @@ class TutorialPlugin(PluginBase):
 
         if self.tut_step == 0:
             tk.Label(self.tut_content_frame, text="🚀 Welcome to OpenAuth", font=("Helvetica", 18, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Let's get your first account set up.\n\nClick the link below to open your Microsoft Security settings in your web browser. You will need to log in.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="Let's get your first account set up.\n\nClick the link below to open your Microsoft Security settings in your web browser. You will need to log in.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             
             link = tk.Label(self.tut_content_frame, text="🔗 Open: aka.ms/mfasetup", font=("Helvetica", 12, "bold", "underline"), bg=bg, fg="#4da6ff", cursor="hand2")
             link.pack(pady=20)
@@ -147,17 +202,17 @@ class TutorialPlugin(PluginBase):
             
         elif self.tut_step == 1:
             tk.Label(self.tut_content_frame, text="Step 1: Add Method", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="On the Microsoft website, click '+ Add sign-in method' and choose 'Microsoft Authenticator' from the options.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="On the Microsoft website, click '+ Add sign-in method' and choose 'Microsoft Authenticator' from the options.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_add_method.png')
             
         elif self.tut_step == 2:
             tk.Label(self.tut_content_frame, text="Step 2: Choose Different App", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Click the small blue link that says 'Set up a different authentication app'.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="Click the small blue link that says 'Set up a different authentication app'.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_different_app.png')
             
         elif self.tut_step == 3:
             tk.Label(self.tut_content_frame, text="Step 3: Scan the QR Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible on the screen before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible on the screen before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_qr_code.png')
             
             def test_scan():
@@ -169,44 +224,69 @@ class TutorialPlugin(PluginBase):
             
         elif self.tut_step == 4:
             tk.Label(self.tut_content_frame, text="Step 4: Verify the Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Now that OpenAuth is generating 6-digit codes on your desktop, click 'Next' on the Microsoft website.\n\nType the 6-digit code OpenAuth is currently displaying into the Microsoft website to verify the link.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="Now that OpenAuth is generating 6-digit codes on your desktop, click 'Next' on the Microsoft website.\n\nType the 6-digit code OpenAuth is currently displaying into the Microsoft website to verify the link.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_verify.png')
             
         elif self.tut_step == 5:
-            tk.Label(self.tut_content_frame, text="Configuration: Hotkeys", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="Shortcut 1: Copy Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(10,5))
             
             desc_text = (
-                "OpenAuth has two powerful keyboard shortcuts you can press anywhere in Windows:\n\n"
-                f"1. Copy Code ({hk_copy}): Instantly copies your code to your clipboard.\n"
-                f"2. Auto-Login ({hk_auto}): A macro that automatically navigates the Microsoft login screen, pasting the current code and handling login for you."
+                f"Press your global hotkey ({hk_copy}) anywhere in Windows to instantly copy your current code. You can then paste it into any website."
             )
-            tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=5)
+            
+            self._add_tut_gif('tut_copy.gif', target_width=480)
             
             self.auto_paste_tut_var = tk.BooleanVar(value=self.app.config["hotkeys"].get("auto_paste", False))
-            ttk.Checkbutton(self.tut_content_frame, text="Enable 'Auto-Paste' for the Copy shortcut (injects keystrokes & hits enter)", variable=self.auto_paste_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
+            ttk.Checkbutton(self.tut_content_frame, text="Direct Type Mode (Instantly types the code out & presses Enter for you)", variable=self.auto_paste_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
 
         elif self.tut_step == 6:
-            tk.Label(self.tut_content_frame, text="Configuration: Auto-Login", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Login as normal and manually click 'I can't use my Outlook mobile app right now'. You will reach the 'Verify your identity' screen shown below.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=5)
+            # PAGE 1 OF AUTO-LOGIN (The Demo)
+            tk.Label(self.tut_content_frame, text="Shortcut 2: Auto-Login (Demo)", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(5,2))
+            
+            desc_text = (
+                f"For full automation, press ({hk_auto}) when you reach the Microsoft 'Verify your identity' screen. OpenAuth will navigate the screen, enter the code, and log you in automatically."
+            )
+            tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=5)
+            
+            self._add_tut_gif('tut_autologin.gif', target_width=480)
+
+        elif self.tut_step == 7:
+            # PAGE 2 OF AUTO-LOGIN (The Configuration)
+            tk.Label(self.tut_content_frame, text="Shortcut 2: Auto-Login (Config)", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(5,2))
+            
+            desc_text = (
+                "To configure this macro perfectly, please log in manually ONCE and click 'I can't use my Outlook mobile app right now'. You will reach the 'Verify your identity' screen shown below."
+            )
+            tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=5)
             
             self._add_tut_imgs_side_by_side(['tut_waystoverify.png', 'tut_waystoverify_3.png'])
             
             tk.Label(self.tut_content_frame, text="How many options appear on this screen for you? (App, Text, Call, etc)", bg=bg, fg=fg).pack(anchor="w", pady=(10,0))
             self.ways_tut_var = tk.StringVar(value=str(self.app.config["hotkeys"].get("auto_login_ways", 2)))
-            self.app.create_styled_entry(self.tut_content_frame, self.ways_tut_var).pack(fill=tk.X, pady=5)
+            self.app.create_styled_entry(self.tut_content_frame, self.ways_tut_var).pack(fill=tk.X, pady=2)
             self.ways_tut_var.trace_add("write", lambda *args: self._tut_save_settings())
 
             test_desc = f"Once configured, make sure your browser window is active (clicked on), and press your Auto-Login shortcut ({hk_auto}) to run the macro!"
-            tk.Label(self.tut_content_frame, text=test_desc, font=("Helvetica", 10, "italic"), bg=bg, fg="gray", wraplength=450, justify=tk.LEFT).pack(pady=(15,5))
+            tk.Label(self.tut_content_frame, text=test_desc, font=("Helvetica", 10, "italic"), bg=bg, fg="gray", wraplength=480, justify=tk.LEFT).pack(pady=(15,5))
 
-        elif self.tut_step == 7:
+        elif self.tut_step == 8:
             tk.Label(self.tut_content_frame, text="Ready to Go!", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window using the 'X', it will hide in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=450).pack(pady=10)
+            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window using the 'X', it will hide in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             
             self.boot_tut_var = tk.BooleanVar(value=self.app.config.get("start_on_boot", False))
             ttk.Checkbutton(self.tut_content_frame, text="Start OpenAuth silently with Windows", variable=self.boot_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
             
-            tk.Label(self.tut_content_frame, text="You can change all of these settings later by clicking the 'Settings' button in the main app.", justify=tk.LEFT, bg=bg, fg="gray", wraplength=450).pack(pady=20)
+            tk.Label(self.tut_content_frame, text="You can change all of these settings later by clicking the 'Settings' button in the main app.", justify=tk.LEFT, bg=bg, fg="gray", wraplength=480).pack(pady=20)
+
+        # Auto-resize the tutorial window to fit the newly rendered content
+        self.tut_win.update_idletasks()
+        req_w = self.tut_win.winfo_reqwidth()
+        req_h = self.tut_win.winfo_reqheight()
+        
+        screen_h = self.tut_win.winfo_screenheight()
+        final_h = min(req_h + 40, screen_h - 100)
+        self.tut_win.geometry(f"{max(520, req_w)}x{final_h}")
 
     def _tut_save_settings(self):
         try:
