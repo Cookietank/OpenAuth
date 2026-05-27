@@ -8,8 +8,6 @@ import os
 import secrets
 import subprocess
 import webbrowser
-import ctypes
-import winreg 
 import threading
 import urllib.request
 import urllib.error
@@ -23,56 +21,61 @@ from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
 
-# --- Core Plugins ---
-from plugins.qr_scanner import ScreenQRScannerPlugin
-from plugins.manual_entry import ManualEntryPlugin
-from plugins.tray_icon import TrayIconPlugin
-from plugins.tutorial import TutorialPlugin
+# --- OS DETECTION & SPECIFIC IMPORTS ---
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
 
-# --- Toggleable Plugins ---
-from plugins.backup_export import BackupExportPlugin  
-from plugins.secure_storage import SecureStoragePlugin
-from plugins.broadcaster import LocalBroadcasterPlugin
-from plugins.auto_login import AutoLoginPlugin
-from plugins.virtual_yubikey import VirtualYubiKeyPlugin
-from plugins.tailscale_sync import TailscaleSyncPlugin
+if IS_WIN:
+    import ctypes
+    import winreg 
 
-APP_VERSION = "v0.1.5.2"
+APP_VERSION = "v1.3.4"
 GITHUB_REPO = "cookietank/OpenAuth"
 
-if "--uninstall" in sys.argv:
-    try:
-        import keyring
-        keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
-    except Exception: pass
-    
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
-        winreg.DeleteValue(key, "OpenAuth")
-        winreg.CloseKey(key)
-    except Exception: pass
+# --- CROSS-PLATFORM APPDATA DIRECTORIES ---
+if IS_WIN:
+    APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
+elif IS_MAC:
+    APPDATA_DIR = os.path.expanduser('~/Library/Application Support/OpenAuth')
+else:
+    APPDATA_DIR = os.path.abspath('OpenAuth_Data')
 
-    vbs_path = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
-    if os.path.exists(vbs_path):
-        try: os.remove(vbs_path)
-        except: pass
-
-    appdata_dir = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
-    if os.path.exists(appdata_dir):
-        shutil.rmtree(appdata_dir, ignore_errors=True)
-
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the .exe file.")
-    sys.exit(0)
-
-APPDATA_DIR = os.path.join(os.getenv('APPDATA'), 'OpenAuth')
 if not os.path.exists(APPDATA_DIR):
     os.makedirs(APPDATA_DIR)
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
 LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
+# =========================================================================
+# SILENT COMMAND-LINE UNINSTALLER
+# =========================================================================
+if "--uninstall" in sys.argv:
+    if IS_WIN:
+        try:
+            import keyring
+            keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
+        except Exception: pass
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+            winreg.DeleteValue(key, "OpenAuth")
+            winreg.CloseKey(key)
+        except Exception: pass
+        vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+        if os.path.exists(vbs_path):
+            try: os.remove(vbs_path)
+            except: pass
+
+    if os.path.exists(APPDATA_DIR):
+        shutil.rmtree(APPDATA_DIR, ignore_errors=True)
+
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
+    sys.exit(0)
+
+# =========================================================================
+# SYSTEM LOGGER
+# =========================================================================
 class SafeLogger:
     def __init__(self, filename, is_stdout=True):
         self.terminal = sys.stdout if is_stdout else sys.stderr
@@ -106,6 +109,18 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
+
+# --- PLUGIN IMPORTS ---
+from plugins.qr_scanner import ScreenQRScannerPlugin
+from plugins.manual_entry import ManualEntryPlugin
+from plugins.tray_icon import TrayIconPlugin
+from plugins.tutorial import TutorialPlugin
+from plugins.backup_export import BackupExportPlugin  
+from plugins.secure_storage import SecureStoragePlugin
+from plugins.broadcaster import LocalBroadcasterPlugin
+from plugins.auto_login import AutoLoginPlugin
+from plugins.virtual_yubikey import VirtualYubiKeyPlugin
+from plugins.tailscale_sync import TailscaleSyncPlugin
 
 CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
@@ -177,8 +192,9 @@ class DesktopAuthenticator:
             "show_tutorial": True,
             "auto_update": True,
             "start_on_boot": False,
-            "privacy_mode": False, # Changed default to False
-            "theme": "Automatic",  # Changed default to Automatic
+            "understood_tray": False,
+            "privacy_mode": False, 
+            "theme": "Automatic",  
             "plugins": {
                 "Backup & Export": True,
                 "Copy Code to Clipboard": True,
@@ -207,7 +223,6 @@ class DesktopAuthenticator:
         except Exception:
             pass
 
-        # Clicking the 'X' now sends the app to the Tray instead of quitting
         self.root.protocol("WM_DELETE_WINDOW", self.send_to_tray)
         
         self.toolbar = tk.Frame(root, bd=1, relief=tk.RAISED, bg=self.colors['bg'])
@@ -240,22 +255,31 @@ class DesktopAuthenticator:
             if self.config.get("show_tutorial", True):
                 self.root.after(500, lambda: self.plugin_manager.broadcast('open_tutorial'))
 
+        # Only run OTA updater if running as an executable
         if getattr(sys, 'frozen', False) and self.config.get("auto_update", True):
             threading.Thread(target=self.check_for_updates, daemon=True).start()
 
         threading.Thread(target=self.check_time_drift, daemon=True).start()
 
-    def get_windows_theme(self):
-        """Reads the Windows Registry to determine if OS is Light or Dark mode."""
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            return "Light" if val == 1 else "Dark"
-        except Exception:
-            return "Light" 
+    def get_os_theme(self):
+        """Cross-platform OS Dark Mode detection."""
+        if IS_WIN:
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                return "Light" if val == 1 else "Dark"
+            except Exception:
+                return "Light" 
+        elif IS_MAC:
+            try:
+                out = subprocess.check_output(['defaults', 'read', '-g', 'AppleInterfaceStyle'], stderr=subprocess.DEVNULL)
+                if out.strip() == b'Dark':
+                    return "Dark"
+            except Exception:
+                pass
+        return "Light"
 
     def send_to_tray(self):
-        """Called when the 'X' button is clicked."""
         for p in self.plugin_manager.plugins:
             if type(p).__name__ == "TrayIconPlugin":
                 p.minimize_to_tray()
@@ -263,12 +287,10 @@ class DesktopAuthenticator:
         self.force_quit_app()
 
     def quit_app_prompt(self):
-        """Called from the Toolbar 'Quit' button with a safety warning."""
         if messagebox.askyesno("Quit OpenAuth", "Are you sure you want to quit OpenAuth?\n\nYou will not be able to use Hotkeys or Auto-Login while the application is closed.", parent=self.root):
             self.force_quit_app()
 
     def force_quit_app(self):
-        """Instantly kills the app (Used by Tray Icon and internal shutdown hooks)."""
         if self.update_job is not None:
             self.root.after_cancel(self.update_job)
         self.root.destroy()
@@ -310,11 +332,10 @@ class DesktopAuthenticator:
             if drift > 15: 
                 warning_msg = (
                     "⚠️ CRITICAL WARNING: TIME DRIFT DETECTED ⚠️\n\n"
-                    f"Your Windows clock is out of sync by {drift:.0f} seconds.\n\n"
+                    f"Your OS clock is out of sync by {drift:.0f} seconds.\n\n"
                     "2FA codes rely on mathematically perfect timing. If your clock is out of sync, "
                     "Microsoft and other services will completely REJECT your codes!\n\n"
-                    "Please right-click your Windows clock, go to 'Adjust date/time', "
-                    "and click 'Sync Now' immediately."
+                    "Please adjust your system date/time and click 'Sync Now' immediately."
                 )
                 self.root.after(0, lambda: messagebox.showwarning("Clock Out of Sync", warning_msg))
         except Exception as e:
@@ -360,15 +381,19 @@ class DesktopAuthenticator:
                     
                     if latest_tuple > current_tuple:
                         download_url = None
-                        asset_name = f"OpenAuth_{latest_version}.exe"
+                        asset_name = f"OpenAuth_{latest_version}.exe" if IS_WIN else f"OpenAuth_{latest_version}"
                         
+                        # Find the correct OS executable in the GitHub release
                         for asset in data.get('assets', []):
-                            if asset['name'].endswith('.exe'):
+                            if IS_WIN and asset['name'].endswith('.exe'):
                                 download_url = asset['browser_download_url']
                                 asset_name = asset['name'] 
                                 break
+                            elif IS_MAC and not asset['name'].endswith('.exe'):
+                                # Mac OTA update logic will be refined when .app packaging is done
+                                pass
                                 
-                        if download_url:
+                        if download_url and IS_WIN:
                             self.root.after(0, lambda: self.prompt_update(latest_version, download_url, asset_name))
         except Exception as e:
             print(f"Update check failed: {e}")
@@ -402,38 +427,24 @@ class DesktopAuthenticator:
         if self.config.get("start_on_boot", False):
             self.manage_startup(True, exe_override=final_exe)
             
-        bat_path = os.path.join(os.path.dirname(current_exe), "apply_openauth_update.bat")
-        
-        if current_exe != final_exe:
-            bat_content = f'''@echo off
-:wait
-timeout /t 1 /nobreak > NUL
-del "{current_exe}"
-if exist "{current_exe}" goto wait
-start "" "{final_exe}"
-del "%~f0"
-'''
-        else:
-            bat_content = f'''@echo off
-:wait
-timeout /t 1 /nobreak > NUL
-del "{current_exe}"
-if exist "{current_exe}" goto wait
-move /Y "{download_target}" "{final_exe}"
-start "" "{final_exe}"
-del "%~f0"
-'''
+        if IS_WIN:
+            bat_path = os.path.join(os.path.dirname(current_exe), "apply_openauth_update.bat")
+            if current_exe != final_exe:
+                bat_content = f'''@echo off\n:wait\ntimeout /t 1 /nobreak > NUL\ndel "{current_exe}"\nif exist "{current_exe}" goto wait\nstart "" "{final_exe}"\ndel "%~f0"\n'''
+            else:
+                bat_content = f'''@echo off\n:wait\ntimeout /t 1 /nobreak > NUL\ndel "{current_exe}"\nif exist "{current_exe}" goto wait\nmove /Y "{download_target}" "{final_exe}"\nstart "" "{final_exe}"\ndel "%~f0"\n'''
 
-        with open(bat_path, "w") as f:
-            f.write(bat_content)
-            
-        env = os.environ.copy()
-        env.pop('_MEIPASS', None)
-        env.pop('_MEIPASS2', None)
-        env.pop('TCL_LIBRARY', None)
-        env.pop('TK_LIBRARY', None)
-            
-        subprocess.Popen(bat_path, shell=True, env=env, creationflags=0x00000008)
+            with open(bat_path, "w") as f:
+                f.write(bat_content)
+                
+            env = os.environ.copy()
+            env.pop('_MEIPASS', None)
+            env.pop('_MEIPASS2', None)
+            env.pop('TCL_LIBRARY', None)
+            env.pop('TK_LIBRARY', None)
+                
+            subprocess.Popen(bat_path, shell=True, env=env, creationflags=0x00000008)
+        
         os._exit(0)
 
     def get_icon_image(self):
@@ -451,7 +462,7 @@ del "%~f0"
     def apply_theme_colors(self):
         theme_setting = self.config.get("theme", "Automatic")
         if theme_setting == "Automatic":
-            theme_choice = self.get_windows_theme()
+            theme_choice = self.get_os_theme()
         else:
             theme_choice = theme_setting
             
@@ -520,6 +531,7 @@ del "%~f0"
                     self.config["show_tutorial"] = saved_config.get("show_tutorial", True)
                     self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
+                    self.config["understood_tray"] = saved_config.get("understood_tray", False)
                     self.config["privacy_mode"] = saved_config.get("privacy_mode", False)
                     self.config["theme"] = saved_config.get("theme", "Automatic")
                     
@@ -538,33 +550,35 @@ del "%~f0"
             json.dump(self.config, f, indent=4)
 
     def manage_startup(self, enable, exe_override=None):
-        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        app_name = "OpenAuth"
-        
-        vbs_path = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
-        if os.path.exists(vbs_path):
-            try: os.remove(vbs_path)
-            except: pass
+        if IS_WIN:
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            app_name = "OpenAuth"
+            
+            vbs_path = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+            if os.path.exists(vbs_path):
+                try: os.remove(vbs_path)
+                except: pass
 
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
-            if enable:
-                if getattr(sys, 'frozen', False):
-                    target_exe = exe_override if exe_override else sys.executable
-                    app_path = f'"{target_exe}" --tray'
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
+                if enable:
+                    if getattr(sys, 'frozen', False):
+                        target_exe = exe_override if exe_override else sys.executable
+                        app_path = f'"{target_exe}" --tray'
+                    else:
+                        pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
+                        script_path = os.path.abspath(sys.argv[0])
+                        app_path = f'"{pythonw_path}" "{script_path}" --tray'
+                    winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
                 else:
-                    pythonw_path = sys.executable.replace("python.exe", "pythonw.exe")
-                    script_path = os.path.abspath(sys.argv[0])
-                    app_path = f'"{pythonw_path}" "{script_path}" --tray'
-                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
-            else:
-                try:
-                    winreg.DeleteValue(key, app_name)
-                except FileNotFoundError:
-                    pass
-            winreg.CloseKey(key)
-        except Exception as e:
-            print(f"Failed to manage startup registry: {e}")
+                    try: winreg.DeleteValue(key, app_name)
+                    except FileNotFoundError: pass
+                winreg.CloseKey(key)
+            except Exception as e:
+                print(f"Failed to manage startup registry: {e}")
+        elif IS_MAC:
+            # macOS LaunchAgents implementation will be added here!
+            pass
 
     def report_issue(self):
         issue_win = tk.Toplevel(self.root)
@@ -586,10 +600,11 @@ del "%~f0"
         msg.pack(padx=20, pady=10)
 
         def open_log_folder():
-            os.startfile(APPDATA_DIR)
+            if IS_WIN: os.startfile(APPDATA_DIR)
+            elif IS_MAC: subprocess.call(["open", APPDATA_DIR])
 
         def open_and_close():
-            template = f"**OpenAuth Version:** {APP_VERSION}\n**OS:** Windows\n\n**Bug Description:**\n[Describe what went wrong here]\n\n**Steps to Reproduce:**\n1. \n2. "
+            template = f"**OpenAuth Version:** {APP_VERSION}\n**OS:** {sys.platform}\n\n**Bug Description:**\n[Describe what went wrong here]\n\n**Steps to Reproduce:**\n1. \n2. "
             self.root.clipboard_clear()
             self.root.clipboard_append(template)
             self.root.update()
@@ -619,7 +634,7 @@ del "%~f0"
                 
                 shutil.rmtree(APPDATA_DIR, ignore_errors=True)
                 
-                messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely wiped from your system.\n\nThe application will now close. You can safely delete the .exe file.")
+                messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely wiped from your system.\n\nThe application will now close. You can safely delete the executable.")
                 os._exit(0)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to completely wipe data:\n{e}")
@@ -647,7 +662,7 @@ del "%~f0"
         notebook.add(general_frame, text="General")
         
         boot_var = tk.BooleanVar(value=self.config.get("start_on_boot", False))
-        ttk.Checkbutton(general_frame, text="Start with Windows (Hidden in Tray)", variable=boot_var).pack(anchor="w", padx=10, pady=(15, 5))
+        ttk.Checkbutton(general_frame, text="Start with OS (Hidden in Tray)", variable=boot_var).pack(anchor="w", padx=10, pady=(15, 5))
         
         update_var = tk.BooleanVar(value=self.config.get("auto_update", True))
         ttk.Checkbutton(general_frame, text="Check for updates automatically on launch", variable=update_var).pack(anchor="w", padx=10, pady=5)
@@ -690,7 +705,7 @@ del "%~f0"
             self.create_styled_entry(plugin_frame, var).pack(fill=tk.X, padx=10, pady=(0, 5), ipady=3)
 
         auto_paste_var = tk.BooleanVar(value=self.config["hotkeys"].get("auto_paste", False))
-        ap_chk = ttk.Checkbutton(plugin_frame, text="Direct Type Mode (Instantly types the code & presses Enter instead of copying)", variable=auto_paste_var)
+        ap_chk = ttk.Checkbutton(plugin_frame, text="Auto-Paste Code (Inject Keystrokes & Press Enter)", variable=auto_paste_var)
         ap_chk.pack(anchor="w", padx=10, pady=(5, 0))
 
         delay_var = tk.StringVar(value=str(self.config["hotkeys"].get("auto_login_delay", 0.8)))
@@ -1000,10 +1015,19 @@ del "%~f0"
         self.update_job = self.root.after(1000, self.update_codes)
 
 if __name__ == "__main__":
-    mutex_name = "OpenAuth_Single_Instance_Mutex"
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
-    if ctypes.windll.kernel32.GetLastError() == 183: 
-        sys.exit(0)
+    if IS_WIN:
+        mutex_name = "OpenAuth_Single_Instance_Mutex"
+        mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+        if ctypes.windll.kernel32.GetLastError() == 183: 
+            sys.exit(0)
+    elif IS_MAC:
+        import socket
+        try:
+            lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            lock_socket.bind(("127.0.0.1", 50052)) 
+        except socket.error:
+            print("OpenAuth is already running.")
+            sys.exit(0)
 
     root = tk.Tk()
     app = DesktopAuthenticator(root)

@@ -1,7 +1,0 @@
-### What's New in v0.1.5.2 
-- 🎨 UI & UX Improvements
-	- Animated GIF Demonstrations: The interactive setup wizard now supports looping animated GIFs, providing crystal-clear, visual demonstrations of exactly how the Hotkeys and Auto-Login macros work in real-time.
-    - Terminology Cleanup: Renamed the confusing "Auto-Paste" setting to "Direct Type Mode" to make it completely distinct from the "Auto-Login" macro.
-
-🔧 Bug Fixes & Stability
-	- Responsive Image Engine Rewrite: Completely rebuilt the tutorial's image scaling math. Images and GIFs now preserve their exact aspect ratios and instantly scale to the correct size on page load, permanently fixing the "tiny squashed image" bug.
