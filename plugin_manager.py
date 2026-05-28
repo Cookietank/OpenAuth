@@ -71,46 +71,68 @@ if IS_WIN:
 elif IS_MAC:
     from pynput import keyboard as pynput_kb
 
-    # --- CRITICAL MACOS 15 SEQUOIA FIX ---
-    # macOS forbids querying keyboard layouts from a background thread (HIToolbox crash).
-    # We MUST force pynput to query and cache the layout right here on the Main UI thread!
-    try:
-        pynput_kb.KeyCode.from_char('a')
-        pynput_kb.KeyCode.from_vk(1)
-    except Exception as e:
-        print(f"Mac layout cache prep failed: {e}")
-
     class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback):
             self.callback = callback
             self.listener = None
+            self.current_modifiers = set()
             
+            # Parse the string into required modifiers and the trigger key
             parts = hotkey_str.lower().split('+')
-            mac_parts = []
+            self.required_modifiers = set()
+            self.trigger_key = None
+            
             for p in parts:
                 p = p.strip()
-                if p in ('ctrl', 'alt', 'shift', 'cmd', 'win'):
-                    if p == 'win': p = 'cmd'
-                    mac_parts.append(f"<{p}>")
-                else:
-                    mac_parts.append(p)
-            self.pynput_hotkey = "+".join(mac_parts)
-            
+                if p == 'ctrl': self.required_modifiers.add('ctrl')
+                elif p == 'alt': self.required_modifiers.add('alt')
+                elif p == 'shift': self.required_modifiers.add('shift')
+                elif p in ('win', 'cmd'): self.required_modifiers.add('cmd')
+                else: self.trigger_key = p
+                
+        def on_press(self, key):
             try:
-                self.listener = pynput_kb.GlobalHotKeys({
-                    self.pynput_hotkey: self.callback
-                })
-            except Exception as e:
-                print(f"[!] Failed to init Mac hotkey: {e}")
+                # Track Modifiers
+                if key == pynput_kb.Key.ctrl or key == pynput_kb.Key.ctrl_l or key == pynput_kb.Key.ctrl_r:
+                    self.current_modifiers.add('ctrl')
+                elif key == pynput_kb.Key.alt or key == pynput_kb.Key.alt_l or key == pynput_kb.Key.alt_r:
+                    self.current_modifiers.add('alt')
+                elif key == pynput_kb.Key.shift or key == pynput_kb.Key.shift_l or key == pynput_kb.Key.shift_r:
+                    self.current_modifiers.add('shift')
+                elif key == pynput_kb.Key.cmd or key == pynput_kb.Key.cmd_l or key == pynput_kb.Key.cmd_r:
+                    self.current_modifiers.add('cmd')
+                
+                # Check for trigger key
+                elif hasattr(key, 'char') and key.char:
+                    if key.char.lower() == self.trigger_key:
+                        if self.current_modifiers == self.required_modifiers:
+                            self.callback()
+            except Exception:
+                pass
+
+        def on_release(self, key):
+            try:
+                if key == pynput_kb.Key.ctrl or key == pynput_kb.Key.ctrl_l or key == pynput_kb.Key.ctrl_r:
+                    self.current_modifiers.discard('ctrl')
+                elif key == pynput_kb.Key.alt or key == pynput_kb.Key.alt_l or key == pynput_kb.Key.alt_r:
+                    self.current_modifiers.discard('alt')
+                elif key == pynput_kb.Key.shift or key == pynput_kb.Key.shift_l or key == pynput_kb.Key.shift_r:
+                    self.current_modifiers.discard('shift')
+                elif key == pynput_kb.Key.cmd or key == pynput_kb.Key.cmd_l or key == pynput_kb.Key.cmd_r:
+                    self.current_modifiers.discard('cmd')
+            except Exception:
+                pass
 
         def start(self):
-            print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
-            if self.listener:
-                self.listener.start()
+            print(f"[*] Bound Native Mac Hotkey (Raw Listener)")
+            # Using the raw Listener bypasses the HIToolbox layout query entirely!
+            self.listener = pynput_kb.Listener(on_press=self.on_press, on_release=self.on_release)
+            self.listener.start()
 
         def stop(self):
             if self.listener:
                 self.listener.stop()
+
 
 class PluginBase:
     def __init__(self, app):
