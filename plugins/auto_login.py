@@ -1,6 +1,7 @@
 import threading
 import time
 import sys
+import os
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -9,9 +10,6 @@ IS_WIN = sys.platform == "win32"
 
 if IS_WIN:
     try: import keyboard
-    except ImportError: pass
-elif IS_MAC:
-    try: import pyautogui
     except ImportError: pass
 
 class AutoLoginPlugin(PluginBase):
@@ -53,29 +51,32 @@ class AutoLoginPlugin(PluginBase):
                 keyboard.release('ctrl')
                 keyboard.release('alt')
                 keyboard.release('shift')
-            elif IS_MAC:
-                time.sleep(0.3)
-                pyautogui.keyUp('command')
-                pyautogui.keyUp('option')
-                pyautogui.keyUp('shift')
-                pyautogui.keyUp('ctrl')
-            
-            time.sleep(0.1)
-            
-            tabs_needed = ways_to_verify - 1
-            print(f"[AUTO-LOGIN] Step 1: {tabs_needed}x Tab -> Enter")
-            
-            for _ in range(tabs_needed):
-                if IS_WIN:
-                    keyboard.send('tab')
-                elif IS_MAC:
-                    pyautogui.press('tab')
                 time.sleep(0.1)
                 
-            if IS_WIN:
+                print("[AUTO-LOGIN] Step 1: Tab -> Enter")
+                keyboard.send('tab')
+                time.sleep(0.1) 
                 keyboard.send('enter')
+                time.sleep(delay)
+                
+                tabs_needed = ways_to_verify - 1
+                print(f"[AUTO-LOGIN] Step 2: {tabs_needed}x Tab -> Enter")
+                for _ in range(tabs_needed):
+                    keyboard.send('tab')
+                    time.sleep(0.1)
+                keyboard.send('enter')
+                
             elif IS_MAC:
-                pyautogui.press('enter')
+                print("[AUTO-LOGIN] Step 1: Tab -> Enter (macOS)")
+                os.system("""osascript -e 'tell application "System Events"' -e 'key code 48' -e 'delay 0.1' -e 'key code 36' -e 'end tell'""")
+                time.sleep(delay)
+                
+                tabs_needed = ways_to_verify - 1
+                print(f"[AUTO-LOGIN] Step 2: {tabs_needed}x Tab -> Enter (macOS)")
+                for _ in range(tabs_needed):
+                    os.system("osascript -e 'tell application \"System Events\" to key code 48'")
+                    time.sleep(0.1)
+                os.system("osascript -e 'tell application \"System Events\" to key code 36'")
             
             code = self.get_target_code()
             if code:
@@ -88,15 +89,14 @@ class AutoLoginPlugin(PluginBase):
                 
             time.sleep(delay)
             
-            print("[AUTO-LOGIN] Step 2: Paste -> Enter")
+            print("[AUTO-LOGIN] Step 3: Paste -> Enter")
             if IS_WIN:
                 keyboard.send('ctrl+v')
                 time.sleep(0.2)
                 keyboard.send('enter')
             elif IS_MAC:
-                pyautogui.hotkey('command', 'v')
-                time.sleep(0.2)
-                pyautogui.press('enter')
+                # macOS Native Cmd+V and Enter
+                os.system("""osascript -e 'tell application "System Events"' -e 'keystroke "v" using command down' -e 'delay 0.2' -e 'key code 36' -e 'end tell'""")
             
             print("[AUTO-LOGIN] Sequence Complete!")
             

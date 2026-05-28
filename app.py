@@ -235,6 +235,11 @@ class DesktopAuthenticator:
         self.main_frame = tk.Frame(root, bg=self.colors['bg'])
         self.main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+# Pre-warm macOS network proxies on the main thread to prevent background thread crashes
+        if IS_MAC:
+            try: urllib.request.getproxies()
+            except: pass
+
         self.plugin_manager = PluginManager(self)
         self.load_plugins()
         self.update_codes()

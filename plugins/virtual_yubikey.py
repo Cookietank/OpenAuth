@@ -1,6 +1,7 @@
 import threading
 import time
 import sys
+import os
 import tkinter as tk
 from plugin_manager import PluginBase
 
@@ -9,9 +10,6 @@ IS_WIN = sys.platform == "win32"
 
 if IS_WIN:
     try: import keyboard
-    except ImportError: pass
-elif IS_MAC:
-    try: import pyautogui
     except ImportError: pass
 
 class VirtualYubiKeyPlugin(PluginBase):
@@ -59,8 +57,10 @@ class VirtualYubiKeyPlugin(PluginBase):
                     keyboard.write(code, delay=0.02)
                     keyboard.send('enter')
                 elif IS_MAC:
-                    pyautogui.write(code, interval=0.02)
-                    pyautogui.press('enter')
+                    # Native macOS out-of-process keystroke injection (Crash-proof!)
+                    safe_code = str(code).replace('"', '').replace("'", "")
+                    script = f"""osascript -e 'tell application "System Events"' -e 'keystroke "{safe_code}"' -e 'key code 36' -e 'end tell'"""
+                    os.system(script)
                     
                 self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}\n(Valid for {rem_time}s)")
             except Exception as e:
