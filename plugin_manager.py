@@ -70,34 +70,43 @@ if IS_WIN:
 
 elif IS_MAC:
     from pynput import keyboard as pynput_kb
+    
+    # CRITICAL FIX: Pre-cache the macOS keyboard layout on the MAIN thread.
+    # This prevents the `dispatch_assert_queue_fail` HIToolbox crash.
+    try:
+        _mac_dummy_ctrl = pynput_kb.Controller()
+    except Exception:
+        pass
 
-    class NativeHotkeyThread(threading.Thread):
+    class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback):
-            super().__init__(daemon=True)
             self.callback = callback
             self.listener = None
             
-            # Convert "ctrl+alt+c" into pynput syntax "<ctrl>+<alt>+c"
             parts = hotkey_str.lower().split('+')
             mac_parts = []
             for p in parts:
+                p = p.strip()
                 if p in ('ctrl', 'alt', 'shift', 'cmd', 'win'):
                     if p == 'win': p = 'cmd'
                     mac_parts.append(f"<{p}>")
                 else:
                     mac_parts.append(p)
             self.pynput_hotkey = "+".join(mac_parts)
-
-        def run(self):
-            print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
+            
+            # CRITICAL FIX: Initialize GlobalHotKeys on the MAIN UI thread.
             try:
                 self.listener = pynput_kb.GlobalHotKeys({
                     self.pynput_hotkey: self.callback
                 })
-                self.listener.start()
-                self.listener.join()
             except Exception as e:
-                print(f"[!] Mac Hotkey binding failed. Did you grant Accessibility permissions? {e}")
+                print(f"[!] Failed to init Mac hotkey: {e}")
+
+        def start(self):
+            print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
+            if self.listener:
+                # pynput natively spawns its own safe background thread when .start() is called
+                self.listener.start()
 
         def stop(self):
             if self.listener:
@@ -109,8 +118,11 @@ class PluginBase:
         self.app = app
         self._hotkey_thread = None
 
-    def setup(self): pass
-    def config_updated(self): pass
+    def setup(self):
+        pass
+
+    def config_updated(self):
+        pass
 
     def bind_native_hotkey(self, hotkey_str, callback):
         if self._hotkey_thread:
@@ -125,6 +137,7 @@ class PluginBase:
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
+
 
 class PluginManager:
     def __init__(self, app):
