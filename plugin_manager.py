@@ -50,7 +50,7 @@ if IS_WIN:
                 elif part in VK_CODES: vk = VK_CODES[part]
             
             if not ctypes.windll.user32.RegisterHotKey(None, self.hotkey_id, modifiers, vk):
-                print(f"[!] Failed to register native hotkey: {self.hotkey_str} (May be in use by another app)")
+                print(f"[!] Failed to register native hotkey: {self.hotkey_str}")
                 return
 
             print(f"[*] Bound Native Windows Hotkey: {self.hotkey_str}")
@@ -69,69 +69,69 @@ if IS_WIN:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
 elif IS_MAC:
-    from pynput import keyboard as pynput_kb
+    import AppKit
+    import Quartz
+
+    # macOS Virtual Key Codes
+    MAC_VK_CODES = {
+        'a': 0x00, 's': 0x01, 'd': 0x02, 'f': 0x03, 'h': 0x04, 'g': 0x05, 'z': 0x06, 'x': 0x07,
+        'c': 0x08, 'v': 0x09, 'b': 0x0B, 'q': 0x0C, 'w': 0x0D, 'e': 0x0E, 'r': 0x0F, 'y': 0x10,
+        't': 0x11, '1': 0x12, '2': 0x13, '3': 0x14, '4': 0x15, '6': 0x16, '5': 0x17, '=': 0x18,
+        '9': 0x19, '7': 0x1A, '-': 0x1B, '8': 0x1C, '0': 0x1D, ']': 0x1E, 'o': 0x1F, 'u': 0x20,
+        '[': 0x21, 'i': 0x22, 'p': 0x23, 'l': 0x25, 'j': 0x26, '\'': 0x27, 'k': 0x28, ';': 0x29,
+        '\\': 0x2A, ',': 0x2B, '/': 0x2C, 'n': 0x2D, 'm': 0x2E, '.': 0x2F, '`': 0x32, 'space': 0x31,
+        'enter': 0x24, 'tab': 0x30, 'esc': 0x35
+    }
 
     class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback):
+            self.hotkey_str = hotkey_str
             self.callback = callback
-            self.listener = None
-            self.current_modifiers = set()
+            self.monitor = None
             
-            # Parse the string into required modifiers and the trigger key
             parts = hotkey_str.lower().split('+')
-            self.required_modifiers = set()
-            self.trigger_key = None
+            self.req_mods = 0
+            self.req_vk = None
             
-            for p in parts:
-                p = p.strip()
-                if p == 'ctrl': self.required_modifiers.add('ctrl')
-                elif p == 'alt': self.required_modifiers.add('alt')
-                elif p == 'shift': self.required_modifiers.add('shift')
-                elif p in ('win', 'cmd'): self.required_modifiers.add('cmd')
-                else: self.trigger_key = p
-                
-        def on_press(self, key):
-            try:
-                # Track Modifiers
-                if key == pynput_kb.Key.ctrl or key == pynput_kb.Key.ctrl_l or key == pynput_kb.Key.ctrl_r:
-                    self.current_modifiers.add('ctrl')
-                elif key == pynput_kb.Key.alt or key == pynput_kb.Key.alt_l or key == pynput_kb.Key.alt_r:
-                    self.current_modifiers.add('alt')
-                elif key == pynput_kb.Key.shift or key == pynput_kb.Key.shift_l or key == pynput_kb.Key.shift_r:
-                    self.current_modifiers.add('shift')
-                elif key == pynput_kb.Key.cmd or key == pynput_kb.Key.cmd_l or key == pynput_kb.Key.cmd_r:
-                    self.current_modifiers.add('cmd')
-                
-                # Check for trigger key
-                elif hasattr(key, 'char') and key.char:
-                    if key.char.lower() == self.trigger_key:
-                        if self.current_modifiers == self.required_modifiers:
-                            self.callback()
-            except Exception:
-                pass
+            for part in parts:
+                part = part.strip()
+                if part == 'ctrl': self.req_mods |= AppKit.NSEventModifierFlagControl
+                elif part == 'alt': self.req_mods |= AppKit.NSEventModifierFlagOption
+                elif part == 'shift': self.req_mods |= AppKit.NSEventModifierFlagShift
+                elif part in ('win', 'cmd'): self.req_mods |= AppKit.NSEventModifierFlagCommand
+                elif part in MAC_VK_CODES: self.req_vk = MAC_VK_CODES[part]
 
-        def on_release(self, key):
+        def _handler(self, event):
             try:
-                if key == pynput_kb.Key.ctrl or key == pynput_kb.Key.ctrl_l or key == pynput_kb.Key.ctrl_r:
-                    self.current_modifiers.discard('ctrl')
-                elif key == pynput_kb.Key.alt or key == pynput_kb.Key.alt_l or key == pynput_kb.Key.alt_r:
-                    self.current_modifiers.discard('alt')
-                elif key == pynput_kb.Key.shift or key == pynput_kb.Key.shift_l or key == pynput_kb.Key.shift_r:
-                    self.current_modifiers.discard('shift')
-                elif key == pynput_kb.Key.cmd or key == pynput_kb.Key.cmd_l or key == pynput_kb.Key.cmd_r:
-                    self.current_modifiers.discard('cmd')
+                # Mask out the device-specific flags to just get the core modifier keys
+                flags = event.modifierFlags() & AppKit.NSEventModifierFlagDeviceIndependentFlagsMask
+                vk = event.keyCode()
+                
+                # Check if the pressed keys match our required hotkey
+                if flags == self.req_mods and vk == self.req_vk:
+                    # Fire callback asynchronously so we don't block the Apple Event stream
+                    threading.Thread(target=self.callback, daemon=True).start()
+                    # Return None to "swallow" the keypress so other apps don't see it
+                    return None
             except Exception:
                 pass
+            return event
 
         def start(self):
-            print(f"[*] Bound Native Mac Hotkey (Raw Listener)")
-            # Using the raw Listener bypasses the HIToolbox layout query entirely!
-            self.listener = pynput_kb.Listener(on_press=self.on_press, on_release=self.on_release)
-            self.listener.start()
+            if self.req_vk is None:
+                return
+
+            print(f"[*] Bound Native macOS Cocoa Hotkey: {self.hotkey_str}")
+            
+            # Create a native Apple Event Tap.
+            # This hooks directly into the OS without ANY background thread threading issues!
+            mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
+            self.monitor = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, self._handler)
 
         def stop(self):
-            if self.listener:
-                self.listener.stop()
+            if self.monitor:
+                AppKit.NSEvent.removeMonitor_(self.monitor)
+                self.monitor = None
 
 
 class PluginBase:
@@ -139,11 +139,8 @@ class PluginBase:
         self.app = app
         self._hotkey_thread = None
 
-    def setup(self):
-        pass
-
-    def config_updated(self):
-        pass
+    def setup(self): pass
+    def config_updated(self): pass
 
     def bind_native_hotkey(self, hotkey_str, callback):
         if self._hotkey_thread:
@@ -158,6 +155,7 @@ class PluginBase:
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
+
 
 class PluginManager:
     def __init__(self, app):
