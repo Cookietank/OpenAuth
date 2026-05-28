@@ -19,7 +19,7 @@ class AutoLoginPlugin(PluginBase):
         if "--tray" in sys.argv:
             self.app.root.after(15000, self._delayed_bind)
         else:
-            self._delayed_bind()
+            self.app.root.after(1000, self._delayed_bind)
 
     def _delayed_bind(self):
         hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q")

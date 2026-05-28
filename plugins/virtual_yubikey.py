@@ -17,17 +17,15 @@ elif IS_MAC:
 class VirtualYubiKeyPlugin(PluginBase):
     def setup(self):
         if "--tray" in sys.argv:
-            # Safely delays the bind by 15s on the MAIN thread to prevent Mac panics & Windows boot drops
             self.app.root.after(15000, self._delayed_bind)
         else:
-            self._delayed_bind()
+            self.app.root.after(1000, self._delayed_bind)
 
     def _delayed_bind(self):
         hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c")
         self.bind_native_hotkey(hotkey, self.execute_hotkey_action)
 
     def config_updated(self):
-        """Live Apply: Instantly rebind the hotkey if changed in settings."""
         new_hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "")
         self.bind_native_hotkey(new_hotkey, self.execute_hotkey_action)
 
