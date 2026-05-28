@@ -28,7 +28,7 @@ if IS_WIN:
     }
 
     class NativeHotkeyThread(threading.Thread):
-        def __init__(self, hotkey_str, callback):
+        def __init__(self, hotkey_str, callback, app_ref=None):
             super().__init__(daemon=True)
             self.hotkey_str = hotkey_str
             self.callback = callback
@@ -70,9 +70,8 @@ if IS_WIN:
 
 elif IS_MAC:
     import AppKit
-    import Quartz
+    import ApplicationServices
 
-    # macOS Virtual Key Codes
     MAC_VK_CODES = {
         'a': 0x00, 's': 0x01, 'd': 0x02, 'f': 0x03, 'h': 0x04, 'g': 0x05, 'z': 0x06, 'x': 0x07,
         'c': 0x08, 'v': 0x09, 'b': 0x0B, 'q': 0x0C, 'w': 0x0D, 'e': 0x0E, 'r': 0x0F, 'y': 0x10,
@@ -84,54 +83,81 @@ elif IS_MAC:
     }
 
     class NativeHotkeyThread:
-        def __init__(self, hotkey_str, callback):
+        def __init__(self, hotkey_str, callback, app_ref):
             self.hotkey_str = hotkey_str
             self.callback = callback
-            self.monitor = None
+            self.app_ref = app_ref
+            self.global_monitor = None
+            self.local_monitor = None
             
             parts = hotkey_str.lower().split('+')
-            self.req_mods = 0
+            self.req_ctrl = False
+            self.req_alt = False
+            self.req_shift = False
+            self.req_cmd = False
             self.req_vk = None
             
             for part in parts:
                 part = part.strip()
-                if part == 'ctrl': self.req_mods |= AppKit.NSEventModifierFlagControl
-                elif part == 'alt': self.req_mods |= AppKit.NSEventModifierFlagOption
-                elif part == 'shift': self.req_mods |= AppKit.NSEventModifierFlagShift
-                elif part in ('win', 'cmd'): self.req_mods |= AppKit.NSEventModifierFlagCommand
+                if part == 'ctrl': self.req_ctrl = True
+                elif part == 'alt': self.req_alt = True
+                elif part == 'shift': self.req_shift = True
+                elif part in ('win', 'cmd'): self.req_cmd = True
                 elif part in MAC_VK_CODES: self.req_vk = MAC_VK_CODES[part]
 
-        def _handler(self, event):
-            try:
-                # Mask out the device-specific flags to just get the core modifier keys
-                flags = event.modifierFlags() & AppKit.NSEventModifierFlagDeviceIndependentFlagsMask
-                vk = event.keyCode()
-                
-                # Check if the pressed keys match our required hotkey
-                if flags == self.req_mods and vk == self.req_vk:
-                    # Fire callback asynchronously so we don't block the Apple Event stream
+        def _check_event(self, event):
+            flags = event.modifierFlags()
+            has_ctrl = bool(flags & AppKit.NSEventModifierFlagControl)
+            has_alt = bool(flags & AppKit.NSEventModifierFlagOption)
+            has_shift = bool(flags & AppKit.NSEventModifierFlagShift)
+            has_cmd = bool(flags & AppKit.NSEventModifierFlagCommand)
+            
+            if (has_ctrl == self.req_ctrl and has_alt == self.req_alt and 
+                has_shift == self.req_shift and has_cmd == self.req_cmd):
+                if event.keyCode() == self.req_vk:
                     threading.Thread(target=self.callback, daemon=True).start()
-                    # Return None to "swallow" the keypress so other apps don't see it
-                    return None
-            except Exception:
-                pass
+                    return True
+            return False
+
+        def _global_handler(self, event):
+            self._check_event(event)
+
+        def _local_handler(self, event):
+            if self._check_event(event):
+                return None # Swallow the keypress if app is focused
             return event
 
         def start(self):
             if self.req_vk is None:
                 return
 
+            # Check if macOS is secretly blocking us from receiving hotkeys!
+            if not ApplicationServices.AXIsProcessTrusted():
+                print("[!] macOS Accessibility Permissions missing!")
+                if self.app_ref:
+                    self.app_ref.root.after(1000, lambda: self.app_ref.show_toast(
+                        "⚠️ macOS Accessibility Permissions required for Hotkeys!\n"
+                        "Go to System Settings -> Privacy & Security -> Accessibility", 5000
+                    ))
+
             print(f"[*] Bound Native macOS Cocoa Hotkey: {self.hotkey_str}")
             
-            # Create a native Apple Event Tap.
-            # This hooks directly into the OS without ANY background thread threading issues!
-            mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
-            self.monitor = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, self._handler)
+            # NSEventMaskKeyDown is 1 << 10 (Mathematically safe across all macOS versions)
+            mask = 1 << 10 
+            
+            # Global monitor (fires when OpenAuth is minimized or you are using another app)
+            self.global_monitor = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, self._global_handler)
+            
+            # Local monitor (fires when OpenAuth is focused/clicked on)
+            self.local_monitor = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, self._local_handler)
 
         def stop(self):
-            if self.monitor:
-                AppKit.NSEvent.removeMonitor_(self.monitor)
-                self.monitor = None
+            if self.global_monitor:
+                AppKit.NSEvent.removeMonitor_(self.global_monitor)
+                self.global_monitor = None
+            if self.local_monitor:
+                AppKit.NSEvent.removeMonitor_(self.local_monitor)
+                self.local_monitor = None
 
 
 class PluginBase:
@@ -148,14 +174,16 @@ class PluginBase:
             self._hotkey_thread = None
         
         if hotkey_str:
-            self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback)
+            if IS_MAC:
+                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback, self.app)
+            else:
+                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback)
             self._hotkey_thread.start()
 
     def get_resource_path(self, relative_path):
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
-
 
 class PluginManager:
     def __init__(self, app):
