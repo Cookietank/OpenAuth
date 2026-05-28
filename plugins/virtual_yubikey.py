@@ -63,6 +63,7 @@ class VirtualYubiKeyPlugin(PluginBase):
                     
                 self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}")
             except Exception as e:
+                print(f"[YUBIKEY ERROR] Paste failed: {e}")
                 self.app.root.after(0, self.app.show_toast, f"Paste failed: {e}")
         else:
             self.app.root.after(0, self.app.show_toast, f"Code Copied: {code}")

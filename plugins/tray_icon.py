@@ -18,18 +18,28 @@ elif IS_MAC:
 
         @objc.IBAction
         def showApp_(self, sender):
-            if self.plugin and self.plugin.app:
-                self.plugin.app.root.after(0, self.plugin.restore_from_tray)
+            print("[TRAY DIAGNOSTIC] 'Show OpenAuth' clicked in Mac App Bar.")
+            if self.plugin:
+                # Call directly! Do NOT use root.after() as the event loop may be asleep.
+                try:
+                    self.plugin.restore_from_tray()
+                except Exception as e:
+                    print(f"[TRAY ERROR] Failed to restore app: {e}")
 
         @objc.IBAction
         def copyCode_(self, sender):
-            if self.plugin and self.plugin.app:
-                self.plugin.app.root.after(0, self.plugin.copy_from_tray)
+            print("[TRAY DIAGNOSTIC] 'Copy Code' clicked in Mac App Bar.")
+            if self.plugin:
+                try:
+                    self.plugin.copy_from_tray()
+                except Exception as e:
+                    print(f"[TRAY ERROR] Failed to copy code: {e}")
 
         @objc.IBAction
         def quitApp_(self, sender):
-            if self.plugin and self.plugin.app:
-                self.plugin.app.root.after(0, self.plugin.quit_from_tray)
+            print("[TRAY DIAGNOSTIC] 'Quit' clicked in Mac App Bar.")
+            if self.plugin:
+                self.plugin.quit_from_tray()
 
 
 class TrayIconPlugin(PluginBase):
@@ -44,6 +54,7 @@ class TrayIconPlugin(PluginBase):
             self.app.root.bind("<Unmap>", self.on_unmap)
         
         if "--tray" in sys.argv:
+            print("[TRAY DIAGNOSTIC] App launched with --tray flag. Hiding UI.")
             if IS_WIN:
                 self.app.root.after(100, self.minimize_to_tray)
             elif IS_MAC:
@@ -55,6 +66,7 @@ class TrayIconPlugin(PluginBase):
                 self.minimize_to_tray()
 
     def minimize_to_tray(self, event=None):
+        print("[TRAY DIAGNOSTIC] Minimizing app to background...")
         for widget in self.app.root.winfo_children():
             if isinstance(widget, tk.Toplevel):
                 widget.destroy()
@@ -64,7 +76,6 @@ class TrayIconPlugin(PluginBase):
         if IS_WIN:
             threading.Thread(target=self.show_tray_win, daemon=True).start()
         elif IS_MAC:
-            # Must run on Main Thread for macOS
             self.app.root.after(0, self.show_tray_mac)
 
     def show_tray_win(self):
@@ -79,15 +90,17 @@ class TrayIconPlugin(PluginBase):
         self.icon.run()
 
     def show_tray_mac(self):
+        print("[TRAY DIAGNOSTIC] Creating macOS App Bar icon...")
         try:
             if not self.status_item:
                 self.status_item = AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_(AppKit.NSVariableStatusItemLength)
                 
-                # Load the beautiful OpenAuth icon directly into the Mac App Bar!
                 icon_path = self.app.get_resource_path(os.path.join('plugins', 'icon.icns'))
                 if os.path.exists(icon_path):
                     image = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
                     image.setSize_(AppKit.NSMakeSize(18.0, 18.0))
+                    # THE WHITE ICON FIX: This turns the icon into a native, adaptive Apple silhouette!
+                    image.setTemplate_(True) 
                     self.status_item.button().setImage_(image)
                 else:
                     self.status_item.button().setTitle_("🛡️")
@@ -114,8 +127,9 @@ class TrayIconPlugin(PluginBase):
                 self.status_item.setMenu_(menu)
                 
             AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+            print("[TRAY DIAGNOSTIC] Successfully moved to App Bar.")
         except Exception as e:
-            print(f"Failed to create macOS App Bar menu: {e}")
+            print(f"[TRAY ERROR] Failed to create macOS App Bar menu: {e}")
 
     def copy_from_tray(self, icon=None, item=None):
         if self.app.accounts:
@@ -128,6 +142,7 @@ class TrayIconPlugin(PluginBase):
             self.app.root.after(0, lambda: self.app.show_toast(f"Code copied: {code}"))
 
     def restore_from_tray(self, icon=None, item=None):
+        print("[TRAY DIAGNOSTIC] Restoring application...")
         if IS_WIN:
             self.icon.stop() 
         elif IS_MAC:
@@ -135,16 +150,19 @@ class TrayIconPlugin(PluginBase):
                 if self.status_item:
                     AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(self.status_item)
                     self.status_item = None
-                # Safely toggle macOS policy
+                
                 AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
-                AppKit.NSApp.activateIgnoringOtherApps_(True)
+                
+                # Sledgehammer approach to wake macOS up
+                os.system(f"osascript -e 'tell application \"System Events\" to set frontmost of the first process whose unix id is {os.getpid()} to true'")
             except Exception as e:
-                print(f"Failed to restore from Mac App Bar: {e}")
+                print(f"[TRAY ERROR] Failed to restore from Mac App Bar: {e}")
             
-        self.app.root.after(0, self.app.resize_main_window)
-        self.app.root.after(0, self.app.root.deiconify)
-        self.app.root.after(50, lambda: self.app.root.state('normal'))
-        self.app.root.after(100, self.app.root.lift)
+        self.app.root.deiconify()
+        self.app.root.update()
+        self.app.resize_main_window()
+        self.app.root.lift()
+        print("[TRAY DIAGNOSTIC] Application restored successfully.")
 
     def quit_from_tray(self, icon=None, item=None):
         if IS_WIN:

@@ -50,14 +50,15 @@ if IS_WIN:
                 elif part in VK_CODES: vk = VK_CODES[part]
             
             if not ctypes.windll.user32.RegisterHotKey(None, self.hotkey_id, modifiers, vk):
-                print(f"[!] Failed to register native hotkey: {self.hotkey_str}")
+                print(f"[HOTKEY ERROR] Failed to register native hotkey: {self.hotkey_str}")
                 return
 
-            print(f"[*] Bound Native Windows Hotkey: {self.hotkey_str}")
+            print(f"[HOTKEY SUCCESS] Bound Native Windows Hotkey: {self.hotkey_str}")
 
             msg = wintypes.MSG()
             while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 if msg.message == WM_HOTKEY:
+                    print(f"[HOTKEY TRIGGERED] {self.hotkey_str} was pressed!")
                     self.callback()
                 ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
                 ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
@@ -69,94 +70,45 @@ if IS_WIN:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
 elif IS_MAC:
-    import Quartz
-    import AppKit
+    from pynput import keyboard as pynput_kb
 
-    MAC_VK_CODES = {
-        'a': 0x00, 's': 0x01, 'd': 0x02, 'f': 0x03, 'h': 0x04, 'g': 0x05, 'z': 0x06, 'x': 0x07,
-        'c': 0x08, 'v': 0x09, 'b': 0x0B, 'q': 0x0C, 'w': 0x0D, 'e': 0x0E, 'r': 0x0F, 'y': 0x10,
-        't': 0x11, '1': 0x12, '2': 0x13, '3': 0x14, '4': 0x15, '6': 0x16, '5': 0x17, '=': 0x18,
-        '9': 0x19, '7': 0x1A, '-': 0x1B, '8': 0x1C, '0': 0x1D, ']': 0x1E, 'o': 0x1F, 'u': 0x20,
-        '[': 0x21, 'i': 0x22, 'p': 0x23, 'l': 0x25, 'j': 0x26, '\'': 0x27, 'k': 0x28, ';': 0x29,
-        '\\': 0x2A, ',': 0x2B, '/': 0x2C, 'n': 0x2D, 'm': 0x2E, '.': 0x2F, '`': 0x32, 'space': 0x31,
-        'enter': 0x24, 'tab': 0x30, 'esc': 0x35
-    }
-
-    class NativeHotkeyThread(threading.Thread):
+    class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback, app_ref):
-            super().__init__(daemon=True)
             self.hotkey_str = hotkey_str
             self.callback = callback
-            self.app_ref = app_ref
-            self.loop = None
-            self.tap = None
+            self.listener = None
             
             parts = hotkey_str.lower().split('+')
-            self.req_ctrl = False
-            self.req_alt = False
-            self.req_shift = False
-            self.req_cmd = False
-            self.req_vk = None
+            mac_parts = []
+            for p in parts:
+                p = p.strip()
+                # Ensure Mac keys are accurately mapped to pynput format
+                if p in ('win', 'cmd'): mac_parts.append('<cmd>')
+                elif p == 'ctrl': mac_parts.append('<ctrl>')
+                elif p == 'alt': mac_parts.append('<alt>')
+                elif p == 'shift': mac_parts.append('<shift>')
+                else: mac_parts.append(p)
             
-            for part in parts:
-                part = part.strip()
-                if part == 'ctrl': self.req_ctrl = True
-                elif part == 'alt': self.req_alt = True
-                elif part == 'shift': self.req_shift = True
-                elif part in ('win', 'cmd'): self.req_cmd = True
-                elif part in MAC_VK_CODES: self.req_vk = MAC_VK_CODES[part]
+            self.pynput_hotkey = "+".join(mac_parts)
 
-        def run(self):
-            if self.req_vk is None:
-                return
+        def _hotkey_triggered(self):
+            print(f"[HOTKEY TRIGGERED] Mac Hotkey {self.pynput_hotkey} was pressed!")
+            self.callback()
 
-            # Pure CoreGraphics listener - bypasses HIToolbox and captures globally instantly!
-            def tap_callback(proxy, type_, event, refcon):
-                if type_ == Quartz.kCGEventKeyDown:
-                    flags = Quartz.CGEventGetFlags(event)
-                    vk = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
-                    
-                    has_ctrl = bool(flags & Quartz.kCGEventFlagMaskControl)
-                    has_alt = bool(flags & Quartz.kCGEventFlagMaskAlternate)
-                    has_shift = bool(flags & Quartz.kCGEventFlagMaskShift)
-                    has_cmd = bool(flags & Quartz.kCGEventFlagMaskCommand)
-                    
-                    if (has_ctrl == self.req_ctrl and has_alt == self.req_alt and 
-                        has_shift == self.req_shift and has_cmd == self.req_cmd and 
-                        vk == self.req_vk):
-                        
-                        threading.Thread(target=self.callback, daemon=True).start()
-                        return None # Swallow the keypress
-                return event
-
-            self.tap = Quartz.CGEventTapCreate(
-                Quartz.kCGSessionEventTap,
-                Quartz.kCGHeadInsertEventTap,
-                Quartz.kCGEventTapOptionDefault,
-                Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
-                tap_callback,
-                None
-            )
-
-            if not self.tap:
-                print(f"[!] Failed to bind Mac Hotkey {self.hotkey_str}. Accessibility permissions missing!")
-                if self.app_ref:
-                    self.app_ref.root.after(1000, lambda: self.app_ref.show_toast(
-                        "⚠️ macOS Accessibility Permissions required for Hotkeys!\nGo to System Settings -> Privacy & Security -> Accessibility", 5000))
-                return
-
-            print(f"[*] Bound Native macOS Quartz Hotkey: {self.hotkey_str}")
-            
-            run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, self.tap, 0)
-            self.loop = Quartz.CFRunLoopGetCurrent()
-            Quartz.CFRunLoopAddSource(self.loop, run_loop_source, Quartz.kCFRunLoopCommonModes)
-            Quartz.CGEventTapEnable(self.tap, True)
-            Quartz.CFRunLoopRun()
+        def start(self):
+            print(f"[HOTKEY INIT] Attempting to bind Mac Hotkey: {self.pynput_hotkey}")
+            try:
+                self.listener = pynput_kb.GlobalHotKeys({
+                    self.pynput_hotkey: self._hotkey_triggered
+                })
+                self.listener.start()
+                print(f"[HOTKEY SUCCESS] Successfully bound Mac Hotkey!")
+            except Exception as e:
+                print(f"[HOTKEY ERROR] Mac Hotkey binding failed. Did you grant Accessibility permissions? Error: {e}")
 
         def stop(self):
-            if self.loop:
-                Quartz.CFRunLoopStop(self.loop)
-                self.loop = None
+            if self.listener:
+                self.listener.stop()
 
 
 class PluginBase:
@@ -173,10 +125,7 @@ class PluginBase:
             self._hotkey_thread = None
         
         if hotkey_str:
-            if IS_MAC:
-                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback, self.app)
-            else:
-                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback)
+            self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback, self.app)
             self._hotkey_thread.start()
 
     def get_resource_path(self, relative_path):
