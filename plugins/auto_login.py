@@ -8,18 +8,20 @@ IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 
 if IS_WIN:
-    try:
-        import keyboard
-    except ImportError:
-        pass
+    try: import keyboard
+    except ImportError: pass
 elif IS_MAC:
-    try:
-        import pyautogui
-    except ImportError:
-        pass
+    try: import pyautogui
+    except ImportError: pass
 
 class AutoLoginPlugin(PluginBase):
     def setup(self):
+        if "--tray" in sys.argv:
+            self.app.root.after(15000, self._delayed_bind)
+        else:
+            self._delayed_bind()
+
+    def _delayed_bind(self):
         hotkey = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q")
         self.bind_native_hotkey(hotkey, self.execute_automation)
 
@@ -52,7 +54,6 @@ class AutoLoginPlugin(PluginBase):
                 keyboard.release('alt')
                 keyboard.release('shift')
             elif IS_MAC:
-                # Add a micro-delay on Mac to ensure fingers are off the modifier keys!
                 time.sleep(0.3)
                 pyautogui.keyUp('command')
                 pyautogui.keyUp('option')

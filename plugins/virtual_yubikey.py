@@ -8,18 +8,21 @@ IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 
 if IS_WIN:
-    try:
-        import keyboard
-    except ImportError:
-        pass
+    try: import keyboard
+    except ImportError: pass
 elif IS_MAC:
-    try:
-        import pyautogui
-    except ImportError:
-        pass
+    try: import pyautogui
+    except ImportError: pass
 
 class VirtualYubiKeyPlugin(PluginBase):
     def setup(self):
+        if "--tray" in sys.argv:
+            # Safely delays the bind by 15s on the MAIN thread to prevent Mac panics & Windows boot drops
+            self.app.root.after(15000, self._delayed_bind)
+        else:
+            self._delayed_bind()
+
+    def _delayed_bind(self):
         hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c")
         self.bind_native_hotkey(hotkey, self.execute_hotkey_action)
 
@@ -29,7 +32,6 @@ class VirtualYubiKeyPlugin(PluginBase):
         self.bind_native_hotkey(new_hotkey, self.execute_hotkey_action)
 
     def copy_to_clipboard(self, text):
-        """Safely interacts with Tkinter's clipboard from the main GUI thread."""
         self.app.root.clipboard_clear()
         self.app.root.clipboard_append(text)
         self.app.root.update()
@@ -50,10 +52,7 @@ class VirtualYubiKeyPlugin(PluginBase):
             self._process_code(code, rem_time)
 
     def _process_code(self, code, rem_time):
-        # 1. Always ensure it goes to the clipboard natively as a fallback
         self.app.root.after(0, self.copy_to_clipboard, code)
-        
-        # 2. Check the user's toggle setting
         auto_paste = self.app.config.get("hotkeys", {}).get("auto_paste", False)
         
         if auto_paste:
@@ -74,6 +73,4 @@ class VirtualYubiKeyPlugin(PluginBase):
     def _wait_and_copy_next(self, primary_acc, wait_time):
         time.sleep(wait_time + 0.2)
         new_code = primary_acc.get_current_code()
-        
-        # Safely push the delayed processing back to the main thread
         self.app.root.after(0, lambda: self._process_code(new_code, 30))

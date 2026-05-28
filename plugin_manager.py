@@ -70,13 +70,6 @@ if IS_WIN:
 
 elif IS_MAC:
     from pynput import keyboard as pynput_kb
-    
-    # CRITICAL FIX: Pre-cache the macOS keyboard layout on the MAIN thread.
-    # This prevents the `dispatch_assert_queue_fail` HIToolbox crash.
-    try:
-        _mac_dummy_ctrl = pynput_kb.Controller()
-    except Exception:
-        pass
 
     class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback):
@@ -94,7 +87,7 @@ elif IS_MAC:
                     mac_parts.append(p)
             self.pynput_hotkey = "+".join(mac_parts)
             
-            # CRITICAL FIX: Initialize GlobalHotKeys on the MAIN UI thread.
+            # Instantiation now perfectly safe because Tkinter forces this onto the Main Thread!
             try:
                 self.listener = pynput_kb.GlobalHotKeys({
                     self.pynput_hotkey: self.callback
@@ -105,8 +98,7 @@ elif IS_MAC:
         def start(self):
             print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
             if self.listener:
-                # pynput natively spawns its own safe background thread when .start() is called
-                self.listener.start()
+                self.listener.start() # pynput natively handles its own background listener thread!
 
         def stop(self):
             if self.listener:
