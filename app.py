@@ -303,6 +303,13 @@ class DesktopAuthenticator:
         return os.path.join(os.path.abspath("."), relative_path)
 
     def show_toast(self, message, duration=2500):
+        if IS_MAC:
+            # Escaping quotes to prevent AppleScript injection crashes
+            safe_msg = message.replace('"', "'")
+            os.system(f"""osascript -e 'display notification "{safe_msg}" with title "OpenAuth"'""")
+            return
+
+        # Windows Custom Tkinter Toast
         toast = tk.Toplevel(self.root)
         toast.overrideredirect(True)
         toast.attributes('-topmost', True)
