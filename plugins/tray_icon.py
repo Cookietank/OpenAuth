@@ -47,7 +47,7 @@ class TrayIconPlugin(PluginBase):
             if IS_WIN:
                 self.app.root.after(100, self.minimize_to_tray)
             elif IS_MAC:
-                self.app.root.after(100, self.app.root.iconify)
+                self.app.root.after(100, self.minimize_to_tray)
 
     def on_unmap(self, event):
         if IS_WIN:
@@ -64,7 +64,8 @@ class TrayIconPlugin(PluginBase):
         if IS_WIN:
             threading.Thread(target=self.show_tray_win, daemon=True).start()
         elif IS_MAC:
-            self.show_tray_mac()
+            # Must run on Main Thread for macOS
+            self.app.root.after(0, self.show_tray_mac)
 
     def show_tray_win(self):
         image = self.app.get_icon_image()
@@ -78,32 +79,43 @@ class TrayIconPlugin(PluginBase):
         self.icon.run()
 
     def show_tray_mac(self):
-        if not self.status_item:
-            self.status_item = AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_(AppKit.NSVariableStatusItemLength)
-            self.status_item.button().setTitle_("🛡️")
-            
-            self.mac_delegate = MacTrayDelegate.alloc().init()
-            self.mac_delegate.plugin = self
-            
-            menu = AppKit.NSMenu.alloc().init()
-            
-            item_show = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Show OpenAuth", "showApp:", "")
-            item_show.setTarget_(self.mac_delegate)
-            menu.addItem_(item_show)
-            
-            item_copy = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Copy Primary Code", "copyCode:", "")
-            item_copy.setTarget_(self.mac_delegate)
-            menu.addItem_(item_copy)
-            
-            menu.addItem_(AppKit.NSMenuItem.separatorItem())
-            
-            item_quit = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "quitApp:", "")
-            item_quit.setTarget_(self.mac_delegate)
-            menu.addItem_(item_quit)
-            
-            self.status_item.setMenu_(menu)
-            
-        AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        try:
+            if not self.status_item:
+                self.status_item = AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_(AppKit.NSVariableStatusItemLength)
+                
+                # Load the beautiful OpenAuth icon directly into the Mac App Bar!
+                icon_path = self.app.get_resource_path(os.path.join('plugins', 'icon.icns'))
+                if os.path.exists(icon_path):
+                    image = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
+                    image.setSize_(AppKit.NSMakeSize(18.0, 18.0))
+                    self.status_item.button().setImage_(image)
+                else:
+                    self.status_item.button().setTitle_("🛡️")
+                
+                self.mac_delegate = MacTrayDelegate.alloc().init()
+                self.mac_delegate.plugin = self
+                
+                menu = AppKit.NSMenu.alloc().init()
+                
+                item_show = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Show OpenAuth", "showApp:", "")
+                item_show.setTarget_(self.mac_delegate)
+                menu.addItem_(item_show)
+                
+                item_copy = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Copy Primary Code", "copyCode:", "")
+                item_copy.setTarget_(self.mac_delegate)
+                menu.addItem_(item_copy)
+                
+                menu.addItem_(AppKit.NSMenuItem.separatorItem())
+                
+                item_quit = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "quitApp:", "")
+                item_quit.setTarget_(self.mac_delegate)
+                menu.addItem_(item_quit)
+                
+                self.status_item.setMenu_(menu)
+                
+            AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+        except Exception as e:
+            print(f"Failed to create macOS App Bar menu: {e}")
 
     def copy_from_tray(self, icon=None, item=None):
         if self.app.accounts:
@@ -119,15 +131,18 @@ class TrayIconPlugin(PluginBase):
         if IS_WIN:
             self.icon.stop() 
         elif IS_MAC:
-            if self.status_item:
-                AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(self.status_item)
-                self.status_item = None
-            AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
-            AppKit.NSApp.activateIgnoringOtherApps_(True)
+            try:
+                if self.status_item:
+                    AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(self.status_item)
+                    self.status_item = None
+                # Safely toggle macOS policy
+                AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+            except Exception as e:
+                print(f"Failed to restore from Mac App Bar: {e}")
             
         self.app.root.after(0, self.app.resize_main_window)
         self.app.root.after(0, self.app.root.deiconify)
-        
         self.app.root.after(50, lambda: self.app.root.state('normal'))
         self.app.root.after(100, self.app.root.lift)
 

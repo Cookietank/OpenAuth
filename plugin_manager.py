@@ -69,8 +69,8 @@ if IS_WIN:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
 elif IS_MAC:
+    import Quartz
     import AppKit
-    import ApplicationServices
 
     MAC_VK_CODES = {
         'a': 0x00, 's': 0x01, 'd': 0x02, 'f': 0x03, 'h': 0x04, 'g': 0x05, 'z': 0x06, 'x': 0x07,
@@ -82,13 +82,14 @@ elif IS_MAC:
         'enter': 0x24, 'tab': 0x30, 'esc': 0x35
     }
 
-    class NativeHotkeyThread:
+    class NativeHotkeyThread(threading.Thread):
         def __init__(self, hotkey_str, callback, app_ref):
+            super().__init__(daemon=True)
             self.hotkey_str = hotkey_str
             self.callback = callback
             self.app_ref = app_ref
-            self.global_monitor = None
-            self.local_monitor = None
+            self.loop = None
+            self.tap = None
             
             parts = hotkey_str.lower().split('+')
             self.req_ctrl = False
@@ -105,52 +106,58 @@ elif IS_MAC:
                 elif part in ('win', 'cmd'): self.req_cmd = True
                 elif part in MAC_VK_CODES: self.req_vk = MAC_VK_CODES[part]
 
-        def _check_event(self, event):
-            flags = event.modifierFlags()
-            has_ctrl = bool(flags & AppKit.NSEventModifierFlagControl)
-            has_alt = bool(flags & AppKit.NSEventModifierFlagOption)
-            has_shift = bool(flags & AppKit.NSEventModifierFlagShift)
-            has_cmd = bool(flags & AppKit.NSEventModifierFlagCommand)
-            
-            if (has_ctrl == self.req_ctrl and has_alt == self.req_alt and 
-                has_shift == self.req_shift and has_cmd == self.req_cmd):
-                if event.keyCode() == self.req_vk:
-                    threading.Thread(target=self.callback, daemon=True).start()
-                    return True
-            return False
-
-        def _global_handler(self, event):
-            self._check_event(event)
-
-        def _local_handler(self, event):
-            if self._check_event(event):
-                return None 
-            return event
-
-        def start(self):
+        def run(self):
             if self.req_vk is None:
                 return
 
-            if not ApplicationServices.AXIsProcessTrusted():
-                print("[!] macOS Accessibility Permissions missing!")
+            # Pure CoreGraphics listener - bypasses HIToolbox and captures globally instantly!
+            def tap_callback(proxy, type_, event, refcon):
+                if type_ == Quartz.kCGEventKeyDown:
+                    flags = Quartz.CGEventGetFlags(event)
+                    vk = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+                    
+                    has_ctrl = bool(flags & Quartz.kCGEventFlagMaskControl)
+                    has_alt = bool(flags & Quartz.kCGEventFlagMaskAlternate)
+                    has_shift = bool(flags & Quartz.kCGEventFlagMaskShift)
+                    has_cmd = bool(flags & Quartz.kCGEventFlagMaskCommand)
+                    
+                    if (has_ctrl == self.req_ctrl and has_alt == self.req_alt and 
+                        has_shift == self.req_shift and has_cmd == self.req_cmd and 
+                        vk == self.req_vk):
+                        
+                        threading.Thread(target=self.callback, daemon=True).start()
+                        return None # Swallow the keypress
+                return event
+
+            self.tap = Quartz.CGEventTapCreate(
+                Quartz.kCGSessionEventTap,
+                Quartz.kCGHeadInsertEventTap,
+                Quartz.kCGEventTapOptionDefault,
+                Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+                tap_callback,
+                None
+            )
+
+            if not self.tap:
+                print(f"[!] Failed to bind Mac Hotkey {self.hotkey_str}. Accessibility permissions missing!")
                 if self.app_ref:
                     self.app_ref.root.after(1000, lambda: self.app_ref.show_toast(
-                        "⚠️ macOS Accessibility Permissions required for Hotkeys!\n"
-                        "Go to System Settings -> Privacy & Security -> Accessibility", 5000
-                    ))
+                        "⚠️ macOS Accessibility Permissions required for Hotkeys!\nGo to System Settings -> Privacy & Security -> Accessibility", 5000))
+                return
 
-            print(f"[*] Bound Native macOS Cocoa Hotkey: {self.hotkey_str}")
-            mask = 1 << 10 
-            self.global_monitor = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, self._global_handler)
-            self.local_monitor = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, self._local_handler)
+            print(f"[*] Bound Native macOS Quartz Hotkey: {self.hotkey_str}")
+            
+            run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, self.tap, 0)
+            self.loop = Quartz.CFRunLoopGetCurrent()
+            Quartz.CFRunLoopAddSource(self.loop, run_loop_source, Quartz.kCFRunLoopCommonModes)
+            Quartz.CGEventTapEnable(self.tap, True)
+            Quartz.CFRunLoopRun()
 
         def stop(self):
-            if self.global_monitor:
-                AppKit.NSEvent.removeMonitor_(self.global_monitor)
-                self.global_monitor = None
-            if self.local_monitor:
-                AppKit.NSEvent.removeMonitor_(self.local_monitor)
-                self.local_monitor = None
+            if self.loop:
+                Quartz.CFRunLoopStop(self.loop)
+                self.loop = None
+
 
 class PluginBase:
     def __init__(self, app):
