@@ -71,6 +71,15 @@ if IS_WIN:
 elif IS_MAC:
     from pynput import keyboard as pynput_kb
 
+    # --- CRITICAL MACOS 15 SEQUOIA FIX ---
+    # macOS forbids querying keyboard layouts from a background thread (HIToolbox crash).
+    # We MUST force pynput to query and cache the layout right here on the Main UI thread!
+    try:
+        pynput_kb.KeyCode.from_char('a')
+        pynput_kb.KeyCode.from_vk(1)
+    except Exception as e:
+        print(f"Mac layout cache prep failed: {e}")
+
     class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback):
             self.callback = callback
@@ -87,7 +96,6 @@ elif IS_MAC:
                     mac_parts.append(p)
             self.pynput_hotkey = "+".join(mac_parts)
             
-            # Instantiation now perfectly safe because Tkinter forces this onto the Main Thread!
             try:
                 self.listener = pynput_kb.GlobalHotKeys({
                     self.pynput_hotkey: self.callback
@@ -98,12 +106,11 @@ elif IS_MAC:
         def start(self):
             print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
             if self.listener:
-                self.listener.start() # pynput natively handles its own background listener thread!
+                self.listener.start()
 
         def stop(self):
             if self.listener:
                 self.listener.stop()
-
 
 class PluginBase:
     def __init__(self, app):
@@ -129,7 +136,6 @@ class PluginBase:
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
-
 
 class PluginManager:
     def __init__(self, app):
