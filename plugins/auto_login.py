@@ -95,7 +95,6 @@ class AutoLoginPlugin(PluginBase):
                 time.sleep(0.2)
                 keyboard.send('enter')
             elif IS_MAC:
-                # macOS Native Cmd+V and Enter
                 os.system("""osascript -e 'tell application "System Events"' -e 'keystroke "v" using command down' -e 'delay 0.2' -e 'key code 36' -e 'end tell'""")
             
             print("[AUTO-LOGIN] Sequence Complete!")

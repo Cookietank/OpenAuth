@@ -41,7 +41,7 @@ class VirtualYubiKeyPlugin(PluginBase):
         rem_time = primary_acc.get_time_remaining()
         
         if rem_time <= 3:
-            self.app.root.after(0, self.app.show_toast, f"Code expiring in {rem_time}s!\nWaiting for next code...", 3000)
+            self.app.root.after(0, self.app.show_toast, f"Code expiring in {rem_time}s!\nWaiting for next code...")
             threading.Thread(target=self._wait_and_copy_next, args=(primary_acc, rem_time), daemon=True).start()
         else:
             code = primary_acc.get_current_code()
@@ -57,16 +57,15 @@ class VirtualYubiKeyPlugin(PluginBase):
                     keyboard.write(code, delay=0.02)
                     keyboard.send('enter')
                 elif IS_MAC:
-                    # Native macOS out-of-process keystroke injection (Crash-proof!)
                     safe_code = str(code).replace('"', '').replace("'", "")
                     script = f"""osascript -e 'tell application "System Events"' -e 'keystroke "{safe_code}"' -e 'key code 36' -e 'end tell'"""
                     os.system(script)
                     
-                self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}\n(Valid for {rem_time}s)")
+                self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}")
             except Exception as e:
                 self.app.root.after(0, self.app.show_toast, f"Paste failed: {e}")
         else:
-            self.app.root.after(0, self.app.show_toast, f"Code Copied: {code}\n(Valid for {rem_time}s)")
+            self.app.root.after(0, self.app.show_toast, f"Code Copied: {code}")
 
     def _wait_and_copy_next(self, primary_acc, wait_time):
         time.sleep(wait_time + 0.2)
