@@ -2,8 +2,11 @@ import tkinter as tk
 from tkinter import ttk
 import webbrowser
 import os
+import sys
 from PIL import Image, ImageTk
 from plugin_manager import PluginBase
+
+IS_MAC = sys.platform == "darwin"
 
 class TutorialPlugin(PluginBase):
     def setup(self):
@@ -15,6 +18,7 @@ class TutorialPlugin(PluginBase):
     def start_interactive_tutorial(self):
         self.tut_win = tk.Toplevel(self.app.root)
         self.tut_win.title("OpenAuth Setup")
+        self.tut_win.geometry("550x750")
         self.tut_win.attributes("-topmost", True)
         self.tut_win.configure(bg=self.app.colors['bg'])
         self.tut_step = 0
@@ -36,7 +40,7 @@ class TutorialPlugin(PluginBase):
         self.render_tut_step()
 
     def tut_next(self):
-        if self.tut_step < 8:  # Extended to handle 8 steps now
+        if self.tut_step < 8:
             self.tut_step += 1
             self.render_tut_step()
         else:
@@ -191,6 +195,9 @@ class TutorialPlugin(PluginBase):
         
         hk_copy = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "ctrl+alt+c").upper()
         hk_auto = self.app.config.get("hotkeys", {}).get("Auto-Login", "ctrl+alt+q").upper()
+        
+        os_tray_name = "macOS Menu Bar (Top Right)" if IS_MAC else "Windows System Tray"
+        os_start_name = "macOS Login" if IS_MAC else "Windows"
 
         if self.tut_step == 0:
             tk.Label(self.tut_content_frame, text="🚀 Welcome to OpenAuth", font=("Helvetica", 18, "bold"), bg=bg, fg=fg).pack(pady=10)
@@ -231,7 +238,7 @@ class TutorialPlugin(PluginBase):
             tk.Label(self.tut_content_frame, text="Shortcut 1: Copy Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(10,5))
             
             desc_text = (
-                f"Press your global hotkey ({hk_copy}) anywhere in Windows to instantly copy your current code. You can then paste it into any website."
+                f"Press your global hotkey ({hk_copy}) anywhere on your computer to instantly copy your current code. You can then paste it into any website."
             )
             tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=5)
             
@@ -241,7 +248,6 @@ class TutorialPlugin(PluginBase):
             ttk.Checkbutton(self.tut_content_frame, text="Direct Type Mode (Instantly types the code out & presses Enter for you)", variable=self.auto_paste_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
 
         elif self.tut_step == 6:
-            # PAGE 1 OF AUTO-LOGIN (The Demo)
             tk.Label(self.tut_content_frame, text="Shortcut 2: Auto-Login (Demo)", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(5,2))
             
             desc_text = (
@@ -252,7 +258,6 @@ class TutorialPlugin(PluginBase):
             self._add_tut_gif('tut_autologin.gif', target_width=480)
 
         elif self.tut_step == 7:
-            # PAGE 2 OF AUTO-LOGIN (The Configuration)
             tk.Label(self.tut_content_frame, text="Shortcut 2: Auto-Login (Config)", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(5,2))
             
             desc_text = (
@@ -272,14 +277,13 @@ class TutorialPlugin(PluginBase):
 
         elif self.tut_step == 8:
             tk.Label(self.tut_content_frame, text="Ready to Go!", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="OpenAuth is designed to run silently in the background.\n\nWhen you close the window using the 'X', it will hide in your System Tray. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
+            tk.Label(self.tut_content_frame, text=f"OpenAuth is designed to run silently in the background.\n\nWhen you close the window using the 'X', it will hide in your {os_tray_name}. Double-click the tray icon to open it, or Right-Click it to instantly copy your code.", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             
             self.boot_tut_var = tk.BooleanVar(value=self.app.config.get("start_on_boot", False))
-            ttk.Checkbutton(self.tut_content_frame, text="Start OpenAuth silently with Windows", variable=self.boot_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
+            ttk.Checkbutton(self.tut_content_frame, text=f"Start OpenAuth silently on {os_start_name}", variable=self.boot_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
             
             tk.Label(self.tut_content_frame, text="You can change all of these settings later by clicking the 'Settings' button in the main app.", justify=tk.LEFT, bg=bg, fg="gray", wraplength=480).pack(pady=20)
 
-        # Auto-resize the tutorial window to fit the newly rendered content
         self.tut_win.update_idletasks()
         req_w = self.tut_win.winfo_reqwidth()
         req_h = self.tut_win.winfo_reqheight()

@@ -17,7 +17,6 @@ import shutil
 import socket
 import struct
 import random
-import plistlib
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
@@ -30,10 +29,9 @@ if IS_WIN:
     import ctypes
     import winreg 
 
-APP_VERSION = "v1.3.4"
+APP_VERSION = "v0.1.6.6"
 GITHUB_REPO = "cookietank/OpenAuth"
 
-# --- CROSS-PLATFORM APPDATA DIRECTORIES ---
 if IS_WIN:
     APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
 elif IS_MAC:
@@ -47,9 +45,6 @@ if not os.path.exists(APPDATA_DIR):
 CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
 LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
-# =========================================================================
-# SILENT COMMAND-LINE UNINSTALLER
-# =========================================================================
 if "--uninstall" in sys.argv:
     if IS_WIN:
         try:
@@ -74,9 +69,6 @@ if "--uninstall" in sys.argv:
     messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
     sys.exit(0)
 
-# =========================================================================
-# SYSTEM LOGGER
-# =========================================================================
 class SafeLogger:
     def __init__(self, filename, is_stdout=True):
         self.terminal = sys.stdout if is_stdout else sys.stderr
@@ -111,7 +103,6 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
 
-# --- PLUGIN IMPORTS ---
 from plugins.qr_scanner import ScreenQRScannerPlugin
 from plugins.manual_entry import ManualEntryPlugin
 from plugins.tray_icon import TrayIconPlugin
@@ -256,14 +247,12 @@ class DesktopAuthenticator:
             if self.config.get("show_tutorial", True):
                 self.root.after(500, lambda: self.plugin_manager.broadcast('open_tutorial'))
 
-        # Only run OTA updater if running as an executable
         if getattr(sys, 'frozen', False) and self.config.get("auto_update", True):
             threading.Thread(target=self.check_for_updates, daemon=True).start()
 
         threading.Thread(target=self.check_time_drift, daemon=True).start()
 
     def get_os_theme(self):
-        """Cross-platform OS Dark Mode detection."""
         if IS_WIN:
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
@@ -304,12 +293,10 @@ class DesktopAuthenticator:
 
     def show_toast(self, message, duration=2500):
         if IS_MAC:
-            # Escaping quotes to prevent AppleScript injection crashes
             safe_msg = message.replace('"', "'")
             os.system(f"""osascript -e 'display notification "{safe_msg}" with title "OpenAuth"'""")
             return
 
-        # Windows Custom Tkinter Toast
         toast = tk.Toplevel(self.root)
         toast.overrideredirect(True)
         toast.attributes('-topmost', True)
@@ -391,14 +378,12 @@ class DesktopAuthenticator:
                         download_url = None
                         asset_name = f"OpenAuth_{latest_version}.exe" if IS_WIN else f"OpenAuth_{latest_version}"
                         
-                        # Find the correct OS executable in the GitHub release
                         for asset in data.get('assets', []):
                             if IS_WIN and asset['name'].endswith('.exe'):
                                 download_url = asset['browser_download_url']
                                 asset_name = asset['name'] 
                                 break
                             elif IS_MAC and not asset['name'].endswith('.exe'):
-                                # Mac OTA update logic will be refined when .app packaging is done
                                 pass
                                 
                         if download_url and IS_WIN:
@@ -561,6 +546,7 @@ class DesktopAuthenticator:
         if IS_WIN:
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             app_name = "OpenAuth"
+            
             vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
             if os.path.exists(vbs_path):
                 try: os.remove(vbs_path)
@@ -583,7 +569,6 @@ class DesktopAuthenticator:
                 winreg.CloseKey(key)
             except Exception as e:
                 print(f"Failed to manage startup registry: {e}")
-                
         elif IS_MAC:
             import plistlib
             plist_path = os.path.expanduser('~/Library/LaunchAgents/com.cookietank.openauth.plist')
@@ -644,7 +629,7 @@ class DesktopAuthenticator:
                    "- All your saved 2FA Secret Keys\n"
                    "- All application settings & logs\n"
                    "- Your Tailscale API Token\n"
-                   "- OpenAuth from Windows Startup\n\n"
+                   f"- OpenAuth from {'macOS Startup' if IS_MAC else 'Windows Startup'}\n\n"
                    "Are you absolutely sure you want to wipe OpenAuth from this computer?")
         if messagebox.askyesno("Factory Reset", warning, icon="warning", parent=self.settings_window):
             try:
@@ -686,7 +671,8 @@ class DesktopAuthenticator:
         notebook.add(general_frame, text="General")
         
         boot_var = tk.BooleanVar(value=self.config.get("start_on_boot", False))
-        ttk.Checkbutton(general_frame, text="Start with OS (Hidden in Tray)", variable=boot_var).pack(anchor="w", padx=10, pady=(15, 5))
+        os_name = "macOS" if IS_MAC else "Windows"
+        ttk.Checkbutton(general_frame, text=f"Start OpenAuth silently on login ({os_name})", variable=boot_var).pack(anchor="w", padx=10, pady=(15, 5))
         
         update_var = tk.BooleanVar(value=self.config.get("auto_update", True))
         ttk.Checkbutton(general_frame, text="Check for updates automatically on launch", variable=update_var).pack(anchor="w", padx=10, pady=5)
