@@ -215,6 +215,10 @@ class DesktopAuthenticator:
         except Exception:
             pass
 
+        # --- NEW MACOS DOCK RESTORE HOOK ---
+        if IS_MAC:
+            self.root.createcommand("::tk::mac::ReopenApplication", self.on_mac_reopen)
+
         self.root.protocol("WM_DELETE_WINDOW", self.send_to_tray)
         
         self.toolbar = tk.Frame(root, bd=1, relief=tk.RAISED, bg=self.colors['bg'])
@@ -268,6 +272,12 @@ class DesktopAuthenticator:
             except Exception:
                 pass
         return "Light"
+
+    def on_mac_reopen(self):
+        """Native macOS hook to restore the app when clicking the icon in the Dock."""
+        self.root.deiconify()
+        self.root.state('normal')
+        self.root.lift()
 
     def send_to_tray(self):
         for p in self.plugin_manager.plugins:

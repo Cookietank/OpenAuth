@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
 import sys
 import os
@@ -28,60 +27,32 @@ elif IS_MAC:
 
 class TrayIconPlugin(PluginBase):
     def setup(self):
-        self.to_tray_btn = None
         self.status_item = None
         self.mac_delegate = None
 
-        btn_text = "To Menu Bar" if IS_MAC else "To Tray"
+        # Dynamically name the button based on the OS
+        btn_text = "To App Bar" if IS_MAC else "To Tray"
+        self.app.add_toolbar_action(btn_text, self.minimize_to_tray, side=tk.RIGHT)
         
-        if not self.app.config.get("understood_tray", False):
-            self.to_tray_btn = self.app.add_toolbar_action(btn_text, self.tray_tutorial_click, side=tk.RIGHT)
-        
-        self.app.root.bind("<Unmap>", self.on_unmap)
+        # We ONLY intercept the background unmap on Windows (to force minimize to tray).
+        # On Mac, the yellow minimize button should go to the Dock naturally!
+        if IS_WIN:
+            self.app.root.bind("<Unmap>", self.on_unmap)
         
         if "--tray" in sys.argv:
-            self.app.root.after(100, self.minimize_to_tray)
-
-    def tray_tutorial_click(self):
-        tut = tk.Toplevel(self.app.root)
-        os_tray_name = "macOS Menu Bar" if IS_MAC else "System Tray"
-        btn_text = "To Menu Bar" if IS_MAC else "To Tray"
-        
-        tut.title(os_tray_name)
-        tut.geometry("380x250")
-        tut.attributes("-topmost", True)
-        tut.configure(bg=self.app.colors['bg'])
-        
-        tk.Label(tut, text=f"ℹ️ Hiding in the {os_tray_name}", font=("Helvetica", 12, "bold"), bg=self.app.colors['bg'], fg=self.app.colors['fg']).pack(pady=15)
-        
-        msg = f"OpenAuth is designed to run silently in the background.\n\nIt minimizes to your {os_tray_name}.\n\nPro Tip: Clicking the Close (X) button does the exact same thing!"
-        tk.Message(tut, text=msg, bg=self.app.colors['bg'], fg=self.app.colors['fg'], width=340, justify=tk.LEFT).pack(padx=20, pady=5)
-        
-        understand_var = tk.BooleanVar(value=True)
-        chk = ttk.Checkbutton(tut, text=f"I understand, remove this '{btn_text}' button", variable=understand_var)
-        chk.pack(pady=10)
-        
-        def proceed():
-            if understand_var.get():
-                self.app.config["understood_tray"] = True
-                self.app.save_config()
-                if self.to_tray_btn:
-                    self.to_tray_btn.pack_forget()
-                    self.to_tray_btn.destroy()
-            tut.destroy()
-            self.minimize_to_tray()
-
-        ttk.Button(tut, text="Got it!", command=proceed).pack(pady=10)
+            if IS_WIN:
+                self.app.root.after(100, self.minimize_to_tray)
+            elif IS_MAC:
+                self.app.root.after(100, self.app.root.iconify)
 
     def on_unmap(self, event):
-        # On Mac, the yellow minimize button naturally minimizes to the Dock.
-        # We ONLY intercept the 'iconic' state on Windows to force it to the Tray.
         if IS_WIN:
             if event.widget == self.app.root and self.app.root.state() == 'iconic':
                 self.minimize_to_tray()
 
     def minimize_to_tray(self, event=None):
         """Hides the app UI, and triggers the OS-specific hidden background state."""
+        # Close settings windows cleanly
         for widget in self.app.root.winfo_children():
             if isinstance(widget, tk.Toplevel):
                 widget.destroy()
@@ -131,7 +102,7 @@ class TrayIconPlugin(PluginBase):
             
             self.status_item.setMenu_(menu)
             
-        # Hide the App from the macOS Dock completely
+        # Hide the App from the macOS Dock completely when pushed to the App Bar
         AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
 
     def copy_from_tray(self, icon=None, item=None):
@@ -148,7 +119,6 @@ class TrayIconPlugin(PluginBase):
         if IS_WIN:
             self.icon.stop() 
         elif IS_MAC:
-            # Remove the Menu Bar icon
             if self.status_item:
                 AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(self.status_item)
                 self.status_item = None
@@ -157,7 +127,11 @@ class TrayIconPlugin(PluginBase):
             AppKit.NSApp.activateIgnoringOtherApps_(True)
             
         self.app.root.after(0, self.app.resize_main_window)
-        self.app.root.after(0, self.app.root.deiconify) 
+        self.app.root.after(0, self.app.root.deiconify)
+        
+        # Force the OS to bring the window to the front
+        self.app.root.after(50, lambda: self.app.root.state('normal'))
+        self.app.root.after(100, self.app.root.lift)
 
     def quit_from_tray(self, icon=None, item=None):
         if IS_WIN:
