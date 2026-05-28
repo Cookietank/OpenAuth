@@ -17,6 +17,7 @@ import shutil
 import socket
 import struct
 import random
+import plistlib
 from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
@@ -553,8 +554,7 @@ class DesktopAuthenticator:
         if IS_WIN:
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             app_name = "OpenAuth"
-            
-            vbs_path = os.path.join(os.getenv('APPDATA'), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+            vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
             if os.path.exists(vbs_path):
                 try: os.remove(vbs_path)
                 except: pass
@@ -576,9 +576,26 @@ class DesktopAuthenticator:
                 winreg.CloseKey(key)
             except Exception as e:
                 print(f"Failed to manage startup registry: {e}")
+                
         elif IS_MAC:
-            # macOS LaunchAgents implementation will be added here!
-            pass
+            import plistlib
+            plist_path = os.path.expanduser('~/Library/LaunchAgents/com.cookietank.openauth.plist')
+            if enable:
+                plist_dict = {
+                    "Label": "com.cookietank.openauth",
+                    "ProgramArguments": [sys.executable, "--tray"] if getattr(sys, 'frozen', False) else [sys.executable, os.path.abspath(sys.argv[0]), "--tray"],
+                    "RunAtLoad": True,
+                    "KeepAlive": False
+                }
+                try:
+                    with open(plist_path, 'wb') as f:
+                        plistlib.dump(plist_dict, f)
+                except Exception as e:
+                    print(f"Failed to set Mac startup: {e}")
+            else:
+                if os.path.exists(plist_path):
+                    try: os.remove(plist_path)
+                    except: pass
 
     def report_issue(self):
         issue_win = tk.Toplevel(self.root)

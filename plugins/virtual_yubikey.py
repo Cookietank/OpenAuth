@@ -1,12 +1,22 @@
 import threading
 import time
+import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
-try:
-    import keyboard
-except ImportError:
-    pass
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+
+if IS_WIN:
+    try:
+        import keyboard
+    except ImportError:
+        pass
+elif IS_MAC:
+    try:
+        import pyautogui
+    except ImportError:
+        pass
 
 class VirtualYubiKeyPlugin(PluginBase):
     def setup(self):
@@ -60,8 +70,13 @@ class VirtualYubiKeyPlugin(PluginBase):
         
         if auto_paste:
             try:
-                keyboard.write(code, delay=0.02)
-                keyboard.send('enter')
+                if IS_WIN:
+                    keyboard.write(code, delay=0.02)
+                    keyboard.send('enter')
+                elif IS_MAC:
+                    pyautogui.write(code, interval=0.02)
+                    pyautogui.press('enter')
+                    
                 self.app.root.after(0, self.show_toast, f"Code Pasted: {code}\n(Valid for {rem_time}s)")
             except Exception as e:
                 self.app.root.after(0, self.show_toast, f"Paste failed: {e}")

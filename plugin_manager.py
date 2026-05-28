@@ -9,7 +9,6 @@ if IS_WIN:
     import ctypes
     from ctypes import wintypes
     
-    # Native Windows API Constants
     WM_HOTKEY = 0x0312
     WM_QUIT = 0x0012
     MOD_ALT = 0x0001
@@ -69,36 +68,49 @@ if IS_WIN:
             if self.thread_id:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
-else:
-    # macOS / Linux Fallback Stub
+elif IS_MAC:
+    from pynput import keyboard as pynput_kb
+
     class NativeHotkeyThread(threading.Thread):
         def __init__(self, hotkey_str, callback):
             super().__init__(daemon=True)
-            self.hotkey_str = hotkey_str
             self.callback = callback
-            self._stop_event = threading.Event()
+            self.listener = None
+            
+            # Convert "ctrl+alt+c" into pynput syntax "<ctrl>+<alt>+c"
+            parts = hotkey_str.lower().split('+')
+            mac_parts = []
+            for p in parts:
+                if p in ('ctrl', 'alt', 'shift', 'cmd', 'win'):
+                    if p == 'win': p = 'cmd'
+                    mac_parts.append(f"<{p}>")
+                else:
+                    mac_parts.append(p)
+            self.pynput_hotkey = "+".join(mac_parts)
 
         def run(self):
-            print(f"[*] Hotkeys are currently disabled on macOS for this beta test.")
-            # Put the thread to sleep peacefully so it doesn't crash the app!
-            while not self._stop_event.is_set():
-                self._stop_event.wait(1)
+            print(f"[*] Bound Native Mac Hotkey: {self.pynput_hotkey}")
+            try:
+                self.listener = pynput_kb.GlobalHotKeys({
+                    self.pynput_hotkey: self.callback
+                })
+                self.listener.start()
+                self.listener.join()
+            except Exception as e:
+                print(f"[!] Mac Hotkey binding failed. Did you grant Accessibility permissions? {e}")
 
         def stop(self):
-            self._stop_event.set()
+            if self.listener:
+                self.listener.stop()
 
 
 class PluginBase:
-    """Base class for all plugins."""
     def __init__(self, app):
         self.app = app
         self._hotkey_thread = None
 
-    def setup(self):
-        pass
-
-    def config_updated(self):
-        pass
+    def setup(self): pass
+    def config_updated(self): pass
 
     def bind_native_hotkey(self, hotkey_str, callback):
         if self._hotkey_thread:
@@ -113,7 +125,6 @@ class PluginBase:
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)
         return os.path.join(os.path.abspath("."), relative_path)
-
 
 class PluginManager:
     def __init__(self, app):

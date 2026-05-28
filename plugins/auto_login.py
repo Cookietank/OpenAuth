@@ -1,12 +1,22 @@
 import threading
 import time
+import sys
 import tkinter as tk
 from plugin_manager import PluginBase
 
-try:
-    import keyboard
-except ImportError:
-    print("Missing libraries. Run: pip install keyboard")
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+
+if IS_WIN:
+    try:
+        import keyboard
+    except ImportError:
+        print("Missing libraries. Run: pip install keyboard")
+elif IS_MAC:
+    try:
+        import pyautogui
+    except ImportError:
+        print("Missing libraries. Run: pip3 install pyautogui")
 
 class AutoLoginPlugin(PluginBase):
     def setup(self):
@@ -56,26 +66,34 @@ class AutoLoginPlugin(PluginBase):
             delay = float(self.app.config.get("hotkeys", {}).get("auto_login_delay", 0.8))
             ways_to_verify = int(self.app.config.get("hotkeys", {}).get("auto_login_ways", 2))
             
-            # Failsafe: release keys in case user is still holding Ctrl/Alt
-            keyboard.release('ctrl')
-            keyboard.release('alt')
-            keyboard.release('shift')
+            # Failsafe: release keys in case user is still holding Ctrl/Alt/Cmd
+            if IS_WIN:
+                keyboard.release('ctrl')
+                keyboard.release('alt')
+                keyboard.release('shift')
+            elif IS_MAC:
+                pyautogui.keyUp('command')
+                pyautogui.keyUp('option')
+                pyautogui.keyUp('shift')
+                pyautogui.keyUp('ctrl')
             
-            print("[AUTO-LOGIN] Step 1: Tab -> Enter")
-            keyboard.send('tab')
-            time.sleep(0.1) 
-            keyboard.send('enter')
+            time.sleep(0.1)
             
-            time.sleep(delay)
-            
+            # Step 1: Dynamic Tabs to select the Authenticator Code option
             tabs_needed = ways_to_verify - 1
-            print(f"[AUTO-LOGIN] Step 2: {tabs_needed}x Tab -> Enter")
+            print(f"[AUTO-LOGIN] Step 1: {tabs_needed}x Tab -> Enter")
             
             for _ in range(tabs_needed):
-                keyboard.send('tab')
+                if IS_WIN:
+                    keyboard.send('tab')
+                elif IS_MAC:
+                    pyautogui.press('tab')
                 time.sleep(0.1)
                 
-            keyboard.send('enter')
+            if IS_WIN:
+                keyboard.send('enter')
+            elif IS_MAC:
+                pyautogui.press('enter')
             
             code = self.get_target_code()
             if code:
@@ -88,10 +106,17 @@ class AutoLoginPlugin(PluginBase):
                 
             time.sleep(delay)
             
-            print("[AUTO-LOGIN] Step 3: Paste -> Enter")
-            keyboard.send('ctrl+v')
-            time.sleep(0.2)
-            keyboard.send('enter')
+            # Step 2: Paste -> Enter
+            print("[AUTO-LOGIN] Step 2: Paste -> Enter")
+            if IS_WIN:
+                keyboard.send('ctrl+v')
+                time.sleep(0.2)
+                keyboard.send('enter')
+            elif IS_MAC:
+                # macOS uses Command+V to paste!
+                pyautogui.hotkey('command', 'v')
+                time.sleep(0.2)
+                pyautogui.press('enter')
             
             print("[AUTO-LOGIN] Sequence Complete!")
             
