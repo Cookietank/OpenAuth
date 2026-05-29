@@ -69,43 +69,90 @@ if IS_WIN:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
 elif IS_MAC:
-    from pynput import keyboard as pynput_kb
+    import AppKit
+    import ApplicationServices
+
+    MAC_VK_CODES = {
+        'a': 0x00, 's': 0x01, 'd': 0x02, 'f': 0x03, 'h': 0x04, 'g': 0x05, 'z': 0x06, 'x': 0x07,
+        'c': 0x08, 'v': 0x09, 'b': 0x0B, 'q': 0x0C, 'w': 0x0D, 'e': 0x0E, 'r': 0x0F, 'y': 0x10,
+        't': 0x11, '1': 0x12, '2': 0x13, '3': 0x14, '4': 0x15, '6': 0x16, '5': 0x17, '=': 0x18,
+        '9': 0x19, '7': 0x1A, '-': 0x1B, '8': 0x1C, '0': 0x1D, ']': 0x1E, 'o': 0x1F, 'u': 0x20,
+        '[': 0x21, 'i': 0x22, 'p': 0x23, 'l': 0x25, 'j': 0x26, '\'': 0x27, 'k': 0x28, ';': 0x29,
+        '\\': 0x2A, ',': 0x2B, '/': 0x2C, 'n': 0x2D, 'm': 0x2E, '.': 0x2F, '`': 0x32, 'space': 0x31,
+        'enter': 0x24, 'tab': 0x30, 'esc': 0x35
+    }
 
     class NativeHotkeyThread:
-        def __init__(self, hotkey_str, callback, app_ref=None):
+        def __init__(self, hotkey_str, callback, app_ref):
+            self.hotkey_str = hotkey_str
             self.callback = callback
-            self.listener = None
+            self.app_ref = app_ref
+            self.global_monitor = None
+            self.local_monitor = None
             
             parts = hotkey_str.lower().split('+')
-            mac_parts = []
-            for p in parts:
-                p = p.strip()
-                if p in ('win', 'cmd'): mac_parts.append('<cmd>')
-                elif p == 'ctrl': mac_parts.append('<ctrl>')
-                elif p == 'alt': mac_parts.append('<alt>')
-                elif p == 'shift': mac_parts.append('<shift>')
-                else: mac_parts.append(p)
+            self.req_ctrl = False
+            self.req_alt = False
+            self.req_shift = False
+            self.req_cmd = False
+            self.req_vk = None
             
-            self.pynput_hotkey = "+".join(mac_parts)
+            for part in parts:
+                part = part.strip()
+                if part == 'ctrl': self.req_ctrl = True
+                elif part == 'alt': self.req_alt = True
+                elif part == 'shift': self.req_shift = True
+                elif part in ('win', 'cmd'): self.req_cmd = True
+                elif part in MAC_VK_CODES: self.req_vk = MAC_VK_CODES[part]
 
-        def _hotkey_triggered(self):
-            print(f"[HOTKEY TRIGGERED] Mac Hotkey {self.pynput_hotkey} was pressed!")
-            self.callback()
+        def _check_event(self, event):
+            flags = event.modifierFlags()
+            has_ctrl = bool(flags & AppKit.NSEventModifierFlagControl)
+            has_alt = bool(flags & AppKit.NSEventModifierFlagOption)
+            has_shift = bool(flags & AppKit.NSEventModifierFlagShift)
+            has_cmd = bool(flags & AppKit.NSEventModifierFlagCommand)
+            
+            if (has_ctrl == self.req_ctrl and has_alt == self.req_alt and 
+                has_shift == self.req_shift and has_cmd == self.req_cmd):
+                if event.keyCode() == self.req_vk:
+                    # Fire callback in a separate thread so we don't stall the macOS Event Stream!
+                    threading.Thread(target=self.callback, daemon=True).start()
+                    return True
+            return False
+
+        def _global_handler(self, event):
+            self._check_event(event)
+
+        def _local_handler(self, event):
+            if self._check_event(event):
+                return None 
+            return event
 
         def start(self):
-            print(f"[HOTKEY INIT] Attempting to bind Mac Hotkey: {self.pynput_hotkey}")
-            try:
-                self.listener = pynput_kb.GlobalHotKeys({
-                    self.pynput_hotkey: self._hotkey_triggered
-                })
-                self.listener.start()
-                print(f"[HOTKEY SUCCESS] Successfully bound Mac Hotkey!")
-            except Exception as e:
-                print(f"[HOTKEY ERROR] Mac Hotkey binding failed. Did you grant Accessibility permissions? Error: {e}")
+            if self.req_vk is None:
+                return
+
+            if not ApplicationServices.AXIsProcessTrusted():
+                print("[!] macOS Accessibility Permissions missing!")
+                if self.app_ref:
+                    self.app_ref.root.after(1000, lambda: self.app_ref.show_toast(
+                        "⚠️ macOS Accessibility Permissions required for Hotkeys!\nGo to System Settings -> Privacy & Security -> Accessibility", 5000))
+
+            print(f"[*] Bound Native macOS Cocoa Hotkey: {self.hotkey_str}")
+            mask = 1 << 10 # NSEventMaskKeyDown
+            
+            # Since these are created on the Main Tkinter Thread, they use the native macOS RunLoop seamlessly!
+            self.global_monitor = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, self._global_handler)
+            self.local_monitor = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, self._local_handler)
 
         def stop(self):
-            if self.listener:
-                self.listener.stop()
+            if self.global_monitor:
+                AppKit.NSEvent.removeMonitor_(self.global_monitor)
+                self.global_monitor = None
+            if self.local_monitor:
+                AppKit.NSEvent.removeMonitor_(self.local_monitor)
+                self.local_monitor = None
+
 
 class PluginBase:
     def __init__(self, app):
@@ -121,8 +168,13 @@ class PluginBase:
             self._hotkey_thread = None
         
         if hotkey_str:
-            self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback, self.app)
-            self._hotkey_thread.start()
+            if IS_MAC:
+                # IMPORTANT: On Mac, we don't start a thread. We just register the monitors on the Main UI thread!
+                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback, self.app)
+                self._hotkey_thread.start()
+            else:
+                self._hotkey_thread = NativeHotkeyThread(hotkey_str, callback)
+                self._hotkey_thread.start()
 
     def get_resource_path(self, relative_path):
         if hasattr(sys, '_MEIPASS'):
