@@ -1,32 +1,59 @@
 <div align="center">
 
 # 🛡️ OpenAuth
-**A Modular Desktop Authenticator for Windows**
+**The Modular Desktop Authenticator for Windows & macOS**
 
-[![OS](https://img.shields.io/badge/OS-Windows_10%20%7C_11-blue?style=flat-square&logo=windows)](https://github.com/cookietank/OpenAuth)
+[![OS](https://img.shields.io/badge/OS-Windows%20%7C%20macOS-blue?style=flat-square&logo=windows)](https://github.com/cookietank/OpenAuth)
 [![Python](https://img.shields.io/badge/Python-3.10+-yellow?style=flat-square&logo=python)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/Status-Beta-success?style=flat-square)]()
 
-OpenAuth is a lightning-fast, desktop 2FA/MFA authenticator. Designed for users of Microsoft enterprise services, it deeply integrates into Windows to bypass the friction of constantly checking your phone for TOTP codes - incredibly useful for organisations that require frequent 2fa!
+OpenAuth is a lightning-fast desktop 2FA/MFA authenticator. Designed specifically for users of Microsoft enterprise services, it deeply integrates into your computer to bypass the friction of constantly checking your phone for login codes—saving you hours of frustration!
 
-Click below for the latest version, then follow the tutorial to setup!
+### 📥 Download the Latest Version
 
-[Download Latest Release](../../releases) • [Report a Bug](../../issues) • [Request a Feature](../../issues)
+[![](https://img.shields.io/badge/Download_for-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/cookietank/OpenAuth/releases/latest)
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+[![](https://img.shields.io/badge/Download_for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/cookietank/OpenAuth/releases/latest)
+
+<br>
+
+[Report a Bug](../../issues) • [Request a Feature](../../issues)
 
 </div>
 
 ---
 
-## 📥 Download & Installation
+## 🚀 How to Install & Run
 
-OpenAuth is a portable application. It requires **no installation** and **no Python environment** to run.
+OpenAuth requires **no complicated installation**. Just download the file for your computer and follow the quick steps below!
 
-1. Download the latest `OpenAuth_vX.X.X.exe` from the **[Releases Page](../../releases)**.
-2. Place the `.exe` wherever you like and double-click to run.
-3. OpenAuth will greet you with an interactive setup wizard!
+### 🪟 For Windows Users
+1. Click the Windows download button above and download the latest **`OpenAuth_vX.X.X.exe`** file.
+2. Move the `.exe` file wherever you want to keep it (like your Desktop or Documents folder).
+3. **Double-click** the file to run it.
 
-> 🛡️ **Security Check:** View the [VirusTotal Scan Results for OpenAuth](https://www.virustotal.com/gui/file/bdf0dfdf976d1630112cd1126e40656ab4b3268e6b48d900b1d293f56f0d7cd7/detection).  
-> *Note: Because OpenAuth is built by an indie developer, Windows SmartScreen may show a blue warning on first launch. Click **More Info -> Run Anyway**.*
+> 🛑 **"Windows protected your PC" Popup?**
+> Because OpenAuth is built by an independent developer, Windows SmartScreen will show a blue warning screen the first time you open it. 
+> * **The Fix:** Simply click **More info** text right under the warning, then click the **Run anyway** button.
+
+> 🛡️ **Security Check:** You can view the clean [VirusTotal Scan Results for OpenAuth.exe here](https://www.virustotal.com/gui/file/bdf0dfdf976d1630112cd1126e40656ab4b3268e6b48d900b1d293f56f0d7cd7/detection).
+
+<br>
+
+### 🍏 For macOS Users
+1. Click the macOS download button above and download the latest **`OpenAuth_vX.X.X_macOS.dmg`** file.
+2. Double-click the downloaded `.dmg` file to open it.
+3. Drag the **OpenAuth** shield icon into the **Applications** folder right next to it.
+4. Open your Mac's Applications folder and find OpenAuth.
+
+> 🛑 **"Developer cannot be verified" Popup?**
+> Apple has strict security for apps not downloaded from the App Store. If you double-click the app normally, Apple will block it from opening.
+> * **The Fix:** Hold the `Control` key on your keyboard and click the OpenAuth app (or just **Right-Click** it), then select **Open** from the menu. When the warning pops up, click the **Open** button. *(You only have to do this trick on the very first launch!)*
+
+---
+
+### 🎉 Next Steps
+Once you have bypassed the security warning, OpenAuth will greet you with a friendly, interactive setup wizard that will guide you step-by-step on how to add your first account!
 
 ---
 
