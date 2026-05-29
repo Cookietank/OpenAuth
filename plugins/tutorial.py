@@ -219,7 +219,10 @@ class TutorialPlugin(PluginBase):
             
         elif self.tut_step == 3:
             tk.Label(self.tut_content_frame, text="Step 3: Scan the QR Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
-            tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible on the screen before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!", justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
+            
+            mac_text = "\n\n🍏 macOS Note: When you click 'Scan Screen', your Mac may ask for 'Screen Recording' permissions. You MUST allow this so OpenAuth can read the QR code!" if IS_MAC else ""
+            
+            tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!" + mac_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_qr_code.png')
             
             def test_scan():
@@ -227,7 +230,16 @@ class TutorialPlugin(PluginBase):
                 for p in self.app.plugin_manager.plugins:
                     if isinstance(p, ScreenQRScannerPlugin):
                         p.scan_screen()
-            ttk.Button(self.tut_content_frame, text="📸 Scan Screen Now", command=test_scan).pack(pady=10)
+            
+            # Pack the scan button
+            ttk.Button(self.tut_content_frame, text="📸 Scan Screen Now", command=test_scan).pack(pady=(10, 5))
+            
+            # NATIVE MACOS SETTINGS BUTTON
+            if IS_MAC:
+                def open_screen_rec_prefs():
+                    os.system("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'")
+                ttk.Button(self.tut_content_frame, text="⚙️ Open macOS Screen Recording Settings", command=open_screen_rec_prefs).pack(pady=(0, 10))
+
             
         elif self.tut_step == 4:
             tk.Label(self.tut_content_frame, text="Step 4: Verify the Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
@@ -237,13 +249,21 @@ class TutorialPlugin(PluginBase):
         elif self.tut_step == 5:
             tk.Label(self.tut_content_frame, text="Shortcut 1: Copy Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=(10,5))
             
+            mac_text = "\n\n🍏 macOS Note: To use hotkeys while OpenAuth is in the background, you MUST grant it 'Accessibility' permissions in your System Settings!" if IS_MAC else ""
+            
             desc_text = (
-                f"Press your global hotkey ({hk_copy}) anywhere on your computer to instantly copy your current code. You can then paste it into any website."
+                f"Press your global hotkey ({hk_copy}) anywhere on your computer to instantly copy your current code. You can then paste it into any website." + mac_text
             )
             tk.Label(self.tut_content_frame, text=desc_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=5)
             
             self._add_tut_gif('tut_copy.gif', target_width=480)
             
+            # NATIVE MACOS SETTINGS BUTTON
+            if IS_MAC:
+                def open_accessibility_prefs():
+                    os.system("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'")
+                ttk.Button(self.tut_content_frame, text="⚙️ Open macOS Accessibility Settings", command=open_accessibility_prefs).pack(pady=5)
+
             self.auto_paste_tut_var = tk.BooleanVar(value=self.app.config["hotkeys"].get("auto_paste", False))
             ttk.Checkbutton(self.tut_content_frame, text="Direct Type Mode (Instantly types the code out & presses Enter for you)", variable=self.auto_paste_tut_var, command=self._tut_save_settings).pack(pady=10, anchor="w")
 
