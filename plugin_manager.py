@@ -1,7 +1,6 @@
 import os
 import sys
 import threading
-import time
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
@@ -70,39 +69,43 @@ if IS_WIN:
                 ctypes.windll.user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
 elif IS_MAC:
-    import keyboard
+    from pynput import keyboard as pynput_kb
 
-    class NativeHotkeyThread(threading.Thread):
+    class NativeHotkeyThread:
         def __init__(self, hotkey_str, callback, app_ref=None):
-            super().__init__(daemon=True)
-            # Ensure proper Mac key mapping (e.g., 'win' becomes 'cmd')
-            self.hotkey_str = hotkey_str.lower().replace('win', 'cmd')
             self.callback = callback
-            self._stop_event = threading.Event()
+            self.listener = None
+            
+            parts = hotkey_str.lower().split('+')
+            mac_parts = []
+            for p in parts:
+                p = p.strip()
+                if p in ('win', 'cmd'): mac_parts.append('<cmd>')
+                elif p == 'ctrl': mac_parts.append('<ctrl>')
+                elif p == 'alt': mac_parts.append('<alt>')
+                elif p == 'shift': mac_parts.append('<shift>')
+                else: mac_parts.append(p)
+            
+            self.pynput_hotkey = "+".join(mac_parts)
 
-        def run(self):
+        def _hotkey_triggered(self):
+            print(f"[HOTKEY TRIGGERED] Mac Hotkey {self.pynput_hotkey} was pressed!")
+            self.callback()
+
+        def start(self):
+            print(f"[HOTKEY INIT] Attempting to bind Mac Hotkey: {self.pynput_hotkey}")
             try:
-                # Clean up any lingering hooks from live-reloads
-                try: keyboard.remove_hotkey(self.hotkey_str)
-                except: pass
-                
-                # Bind using the reliable 'keyboard' library
-                keyboard.add_hotkey(self.hotkey_str, self.callback)
-                print(f"[*] Bound Mac Hotkey: {self.hotkey_str}")
-                
-                # Block the thread safely to keep the listener alive
-                while not self._stop_event.is_set():
-                    time.sleep(0.5)
+                self.listener = pynput_kb.GlobalHotKeys({
+                    self.pynput_hotkey: self._hotkey_triggered
+                })
+                self.listener.start()
+                print(f"[HOTKEY SUCCESS] Successfully bound Mac Hotkey!")
             except Exception as e:
-                print(f"[HOTKEY ERROR] Mac hotkey binding failed. Did you grant Accessibility permissions? Error: {e}")
+                print(f"[HOTKEY ERROR] Mac Hotkey binding failed. Did you grant Accessibility permissions? Error: {e}")
 
         def stop(self):
-            self._stop_event.set()
-            try:
-                keyboard.remove_hotkey(self.hotkey_str)
-            except:
-                pass
-
+            if self.listener:
+                self.listener.stop()
 
 class PluginBase:
     def __init__(self, app):
