@@ -2,8 +2,6 @@ import sys
 import os
 import datetime
 
-# --- CRITICAL FIX: MOVE LOGGER TO THE ABSOLUTE TOP ---
-# This ensures even if an 'import' fails, it is caught in the log file!
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 
@@ -42,7 +40,12 @@ class SafeLogger:
             try: self.log.flush()
             except: pass
 
-APP_VERSION = "v0.1.8.2"
+    def close(self):
+        if self.log:
+            try: self.log.close()
+            except: pass
+
+APP_VERSION = "v0.1.8.3"
 
 with open(LOG_FILE, 'a', encoding='utf-8') as f:
     f.write(f"\n\n[{datetime.datetime.now()}] === NEW OPENAUTH SESSION ({APP_VERSION}) ===\n")
@@ -50,7 +53,12 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
 
-# --- NOW WE CAN SAFELY IMPORT EVERYTHING ELSE ---
+# --- PROTECTED OS IMPORTS ---
+if IS_WIN:
+    import ctypes
+    import winreg
+
+# --- STANDARD IMPORTS ---
 import tkinter as tk
 from tkinter import ttk
 import tkinter.messagebox as messagebox
@@ -59,8 +67,6 @@ import json
 import secrets
 import subprocess
 import webbrowser
-import ctypes
-import winreg 
 import threading
 import urllib.request
 import urllib.error
@@ -240,7 +246,6 @@ class DesktopAuthenticator:
         self.main_frame = tk.Frame(root, bg=self.colors['bg'])
         self.main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        # Pre-warm macOS network proxies on the main thread to prevent background thread crashes
         if IS_MAC:
             try: urllib.request.getproxies()
             except: pass
@@ -248,9 +253,7 @@ class DesktopAuthenticator:
         self.plugin_manager = PluginManager(self)
         self.load_plugins()
 
-        # START THE UI REFRESH LOOP ON THE MAIN THREAD
         self.update_codes()
-
         self.resize_main_window()
 
         if self.config.get("version") != APP_VERSION:
