@@ -20,7 +20,6 @@ elif IS_MAC:
         def showApp_(self, sender):
             print("[TRAY DIAGNOSTIC] 'Show OpenAuth' clicked in Mac App Bar.")
             if self.plugin:
-                # Call directly! Do NOT use root.after() as the event loop may be asleep.
                 try:
                     self.plugin.restore_from_tray()
                 except Exception as e:
@@ -99,7 +98,6 @@ class TrayIconPlugin(PluginBase):
                 if os.path.exists(icon_path):
                     image = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
                     image.setSize_(AppKit.NSMakeSize(18.0, 18.0))
-                    # THE WHITE ICON FIX: This turns the icon into a native, adaptive Apple silhouette!
                     image.setTemplate_(True) 
                     self.status_item.button().setImage_(image)
                 else:
@@ -152,8 +150,9 @@ class TrayIconPlugin(PluginBase):
                     self.status_item = None
                 
                 AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
                 
-                # Sledgehammer approach to wake macOS up
+                # THE SLEDGEHAMMER IS BACK: Force macOS to bring the window to the absolute front
                 os.system(f"osascript -e 'tell application \"System Events\" to set frontmost of the first process whose unix id is {os.getpid()} to true'")
             except Exception as e:
                 print(f"[TRAY ERROR] Failed to restore from Mac App Bar: {e}")
@@ -162,6 +161,7 @@ class TrayIconPlugin(PluginBase):
         self.app.root.update()
         self.app.resize_main_window()
         self.app.root.lift()
+        self.app.root.focus_force() # Force Tkinter to grab UI focus natively
         print("[TRAY DIAGNOSTIC] Application restored successfully.")
 
     def quit_from_tray(self, icon=None, item=None):
