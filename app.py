@@ -45,7 +45,7 @@ class SafeLogger:
             try: self.log.close()
             except: pass
 
-APP_VERSION = "v0.1.8.3"
+APP_VERSION = "v0.1.6.0"
 
 with open(LOG_FILE, 'a', encoding='utf-8') as f:
     f.write(f"\n\n[{datetime.datetime.now()}] === NEW OPENAUTH SESSION ({APP_VERSION}) ===\n")

@@ -1,0 +1,11 @@
+### What's New in v0.1.6.0 
+Full macOS Support!
+- OpenAuth is now completely cross-platform! Mac users can download the native .dmg installer to get the exact same powerful 2FA experience, perfectly adapted for the Apple ecosystem:
+- Native App Bar Integration: OpenAuth lives seamlessly in your macOS Menu Bar with a dynamic, adaptive white Apple icon.
+- AppleScript Automation: The Auto-Login macro and Copy-Toasts have been rewritten using native macOS osascript. Notifications slide in beautifully without ever stealing focus from your web browser!
+- Hardware-Locked Storage: To bypass Apple's strict unsigned-app Keychain restrictions, macOS MFA secrets are securely encrypted using a unique cryptographic key generated from your Mac's motherboard serial number and locked down with strict chmod 600 file permissions.
+- Native Mac Hotkeys: Global shortcuts use native pynput listeners to flawlessly catch your commands anywhere in the OS (requires macOS Accessibility permissions).
+- Launch on Boot: OpenAuth natively registers a .plist with Apple's LaunchAgents to silently start up in the background when you turn on your Mac.
+
+🌟 UI & UX Improvements (All Platforms)
+- Scrollable Tutorial: The interactive setup wizard has been upgraded with a dynamically scrolling canvas. It now supports mouse-wheel scrolling on both Windows and Mac, ensuring screenshots look crisp and perfectly proportioned even on smaller 13-inch laptop screens.
