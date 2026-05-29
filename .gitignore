@@ -17,4 +17,4 @@ openauth.log
 *.log
 *.bat
 bump_version.py
-make_ico.py
+make_ico.py*.sh
