@@ -25,9 +25,43 @@ class TutorialPlugin(PluginBase):
         self.tut_images = [] 
         self.tut_animations = [] 
         
-        self.tut_content_frame = tk.Frame(self.tut_win, bg=self.app.colors['bg'])
-        self.tut_content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # --- SCROLLABLE CANVAS SETUP ---
+        container = tk.Frame(self.tut_win, bg=self.app.colors['bg'])
+        container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.tut_canvas = tk.Canvas(container, bg=self.app.colors['bg'], highlightthickness=0)
+        self.tut_scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tut_canvas.yview)
+        self.tut_content_frame = tk.Frame(self.tut_canvas, bg=self.app.colors['bg'])
+
+        self.tut_content_frame.bind(
+            "<Configure>",
+            lambda e: self.tut_canvas.configure(scrollregion=self.tut_canvas.bbox("all"))
+        )
         
+        self.tut_canvas_window = self.tut_canvas.create_window((0, 0), window=self.tut_content_frame, anchor="nw")
+
+        def configure_canvas(event):
+            self.tut_canvas.itemconfig(self.tut_canvas_window, width=event.width)
+            
+        self.tut_canvas.bind("<Configure>", configure_canvas)
+
+        self.tut_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tut_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tut_canvas.configure(yscrollcommand=self.tut_scrollbar.set)
+
+        # Cross-platform Mousewheel Scrolling
+        def _on_mousewheel(event):
+            if IS_MAC:
+                self.tut_canvas.yview_scroll(int(-1*(event.delta)), "units")
+            else:
+                self.tut_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        self.tut_win.bind("<MouseWheel>", _on_mousewheel)
+        if not IS_MAC: # Linux/X11 scroll support just in case
+            self.tut_win.bind("<Button-4>", lambda e: self.tut_canvas.yview_scroll(-1, "units"))
+            self.tut_win.bind("<Button-5>", lambda e: self.tut_canvas.yview_scroll(1, "units"))
+
+        # --- NAVIGATION ---
         self.tut_nav_frame = tk.Frame(self.tut_win, bg=self.app.colors['bg'])
         self.tut_nav_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=10)
         
@@ -42,6 +76,7 @@ class TutorialPlugin(PluginBase):
     def tut_next(self):
         if self.tut_step < 8:
             self.tut_step += 1
+            self.tut_canvas.yview_moveto(0) # Scroll to top on next page
             self.render_tut_step()
         else:
             self.clear_animations()
@@ -50,6 +85,7 @@ class TutorialPlugin(PluginBase):
     def tut_prev(self):
         if self.tut_step > 0:
             self.tut_step -= 1
+            self.tut_canvas.yview_moveto(0) # Scroll to top on prev page
             self.render_tut_step()
 
     def clear_animations(self):
@@ -220,7 +256,8 @@ class TutorialPlugin(PluginBase):
         elif self.tut_step == 3:
             tk.Label(self.tut_content_frame, text="Step 3: Scan the QR Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
             
-            mac_text = "\n\n🍏 macOS Note: When you click 'Scan Screen', your Mac may ask for 'Screen Recording' permissions. You MUST allow this so OpenAuth can read the QR code!" if IS_MAC else ""
+            # UPDATED: Softer, non-scary Mac wording
+            mac_text = "\n\n🍏 macOS Note: To use 'Scan Screen', macOS requires 'Screen Recording' permissions. If you prefer not to grant this, you can use 'Upload Image' or 'Add Manually' instead." if IS_MAC else ""
             
             tk.Label(self.tut_content_frame, text="Click 'Next' until Microsoft shows a QR code on your screen.\n\nPlease ensure the QR code is fully visible before clicking the 'Scan Screen' button below. OpenAuth will instantly find the code on your monitor and securely save it!" + mac_text, justify=tk.LEFT, bg=bg, fg=fg, wraplength=480).pack(pady=10)
             self._add_tut_img('tut_qr_code.png')
@@ -231,15 +268,12 @@ class TutorialPlugin(PluginBase):
                     if isinstance(p, ScreenQRScannerPlugin):
                         p.scan_screen()
             
-            # Pack the scan button
             ttk.Button(self.tut_content_frame, text="📸 Scan Screen Now", command=test_scan).pack(pady=(10, 5))
             
-            # NATIVE MACOS SETTINGS BUTTON
             if IS_MAC:
                 def open_screen_rec_prefs():
                     os.system("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'")
                 ttk.Button(self.tut_content_frame, text="⚙️ Open macOS Screen Recording Settings", command=open_screen_rec_prefs).pack(pady=(0, 10))
-
             
         elif self.tut_step == 4:
             tk.Label(self.tut_content_frame, text="Step 4: Verify the Code", font=("Helvetica", 16, "bold"), bg=bg, fg=fg).pack(pady=10)
@@ -258,7 +292,6 @@ class TutorialPlugin(PluginBase):
             
             self._add_tut_gif('tut_copy.gif', target_width=480)
             
-            # NATIVE MACOS SETTINGS BUTTON
             if IS_MAC:
                 def open_accessibility_prefs():
                     os.system("open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'")
@@ -304,13 +337,9 @@ class TutorialPlugin(PluginBase):
             
             tk.Label(self.tut_content_frame, text="You can change all of these settings later by clicking the 'Settings' button in the main app.", justify=tk.LEFT, bg=bg, fg="gray", wraplength=480).pack(pady=20)
 
-        self.tut_win.update_idletasks()
-        req_w = self.tut_win.winfo_reqwidth()
-        req_h = self.tut_win.winfo_reqheight()
-        
-        screen_h = self.tut_win.winfo_screenheight()
-        final_h = min(req_h + 40, screen_h - 100)
-        self.tut_win.geometry(f"{max(520, req_w)}x{final_h}")
+        # Dynamic resizing is no longer strictly required for height since we have a scrollbar,
+        # but we maintain a reasonable minimum window size.
+        self.tut_win.geometry("550x750")
 
     def _tut_save_settings(self):
         try:
