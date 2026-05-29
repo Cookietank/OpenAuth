@@ -8,6 +8,8 @@ import os
 import secrets
 import subprocess
 import webbrowser
+import ctypes
+import winreg 
 import threading
 import urllib.request
 import urllib.error
@@ -21,29 +23,25 @@ from PIL import Image, ImageDraw, ImageTk
 from core import StandardAuthAccount
 from plugin_manager import PluginManager
 
-# --- OS DETECTION & SPECIFIC IMPORTS ---
-IS_MAC = sys.platform == "darwin"
-IS_WIN = sys.platform == "win32"
+# --- Core Plugins ---
+from plugins.qr_scanner import ScreenQRScannerPlugin
+from plugins.manual_entry import ManualEntryPlugin
+from plugins.tray_icon import TrayIconPlugin
+from plugins.tutorial import TutorialPlugin
 
-if IS_WIN:
-    import ctypes
-    import winreg 
+# --- Toggleable Plugins ---
+from plugins.backup_export import BackupExportPlugin  
+from plugins.secure_storage import SecureStoragePlugin
+from plugins.broadcaster import LocalBroadcasterPlugin
+from plugins.auto_login import AutoLoginPlugin
+from plugins.virtual_yubikey import VirtualYubiKeyPlugin
+from plugins.tailscale_sync import TailscaleSyncPlugin
 
-APP_VERSION = "v0.1.6.6"
+APP_VERSION = "v0.1.8.1"
 GITHUB_REPO = "cookietank/OpenAuth"
 
-if IS_WIN:
-    APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
-elif IS_MAC:
-    APPDATA_DIR = os.path.expanduser('~/Library/Application Support/OpenAuth')
-else:
-    APPDATA_DIR = os.path.abspath('OpenAuth_Data')
-
-if not os.path.exists(APPDATA_DIR):
-    os.makedirs(APPDATA_DIR)
-
-CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
-LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
 
 if "--uninstall" in sys.argv:
     if IS_WIN:
@@ -61,13 +59,27 @@ if "--uninstall" in sys.argv:
             try: os.remove(vbs_path)
             except: pass
 
-    if os.path.exists(APPDATA_DIR):
-        shutil.rmtree(APPDATA_DIR, ignore_errors=True)
+    appdata_dir = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth') if IS_WIN else os.path.expanduser('~/Library/Application Support/OpenAuth')
+    if os.path.exists(appdata_dir):
+        shutil.rmtree(appdata_dir, ignore_errors=True)
 
     root = tk.Tk()
     root.withdraw()
     messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
     sys.exit(0)
+
+if IS_WIN:
+    APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
+elif IS_MAC:
+    APPDATA_DIR = os.path.expanduser('~/Library/Application Support/OpenAuth')
+else:
+    APPDATA_DIR = os.path.abspath('OpenAuth_Data')
+
+if not os.path.exists(APPDATA_DIR):
+    os.makedirs(APPDATA_DIR)
+
+CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
+LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
 class SafeLogger:
     def __init__(self, filename, is_stdout=True):
@@ -102,17 +114,6 @@ with open(LOG_FILE, 'a', encoding='utf-8') as f:
 
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
-
-from plugins.qr_scanner import ScreenQRScannerPlugin
-from plugins.manual_entry import ManualEntryPlugin
-from plugins.tray_icon import TrayIconPlugin
-from plugins.tutorial import TutorialPlugin
-from plugins.backup_export import BackupExportPlugin  
-from plugins.secure_storage import SecureStoragePlugin
-from plugins.broadcaster import LocalBroadcasterPlugin
-from plugins.auto_login import AutoLoginPlugin
-from plugins.virtual_yubikey import VirtualYubiKeyPlugin
-from plugins.tailscale_sync import TailscaleSyncPlugin
 
 CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
@@ -184,7 +185,6 @@ class DesktopAuthenticator:
             "show_tutorial": True,
             "auto_update": True,
             "start_on_boot": False,
-            "understood_tray": False,
             "privacy_mode": False, 
             "theme": "Automatic",  
             "plugins": {
@@ -215,10 +215,6 @@ class DesktopAuthenticator:
         except Exception:
             pass
 
-        # --- NEW MACOS DOCK RESTORE HOOK ---
-        if IS_MAC:
-            self.root.createcommand("::tk::mac::ReopenApplication", self.on_mac_reopen)
-
         self.root.protocol("WM_DELETE_WINDOW", self.send_to_tray)
         
         self.toolbar = tk.Frame(root, bd=1, relief=tk.RAISED, bg=self.colors['bg'])
@@ -235,13 +231,14 @@ class DesktopAuthenticator:
         self.main_frame = tk.Frame(root, bg=self.colors['bg'])
         self.main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-# Pre-warm macOS network proxies on the main thread to prevent background thread crashes
         if IS_MAC:
             try: urllib.request.getproxies()
             except: pass
 
         self.plugin_manager = PluginManager(self)
         self.load_plugins()
+
+        # START THE UI REFRESH LOOP ON THE MAIN THREAD
         self.update_codes()
 
         self.resize_main_window()
@@ -277,12 +274,6 @@ class DesktopAuthenticator:
             except Exception:
                 pass
         return "Light"
-
-    def on_mac_reopen(self):
-        """Native macOS hook to restore the app when clicking the icon in the Dock."""
-        self.root.deiconify()
-        self.root.state('normal')
-        self.root.lift()
 
     def send_to_tray(self):
         for p in self.plugin_manager.plugins:
@@ -539,7 +530,6 @@ class DesktopAuthenticator:
                     self.config["show_tutorial"] = saved_config.get("show_tutorial", True)
                     self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
-                    self.config["understood_tray"] = saved_config.get("understood_tray", False)
                     self.config["privacy_mode"] = saved_config.get("privacy_mode", False)
                     self.config["theme"] = saved_config.get("theme", "Automatic")
                     
@@ -649,9 +639,10 @@ class DesktopAuthenticator:
         if messagebox.askyesno("Factory Reset", warning, icon="warning", parent=self.settings_window):
             try:
                 self.manage_startup(False)
-                import keyring
-                try: keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
-                except: pass
+                if IS_WIN:
+                    import keyring
+                    try: keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
+                    except: pass
                 
                 sys.stdout.close()
                 sys.stderr.close()
@@ -841,6 +832,7 @@ class DesktopAuthenticator:
                 self.save_config()
                 
                 self.apply_theme_colors()
+                # Explicitly redraw the UI to update the privacy mode dots instantly!
                 self.refresh_ui()
                 self.plugin_manager.broadcast('config_updated')
                 
@@ -1011,6 +1003,7 @@ class DesktopAuthenticator:
         self.resize_main_window()
 
     def update_codes(self):
+        # EVERYTHING ON THE MAIN THREAD - Prevents macOS 15 HIToolbox Crashes!
         if self.accounts:
             time_remaining = self.accounts[0].get_time_remaining()
             self.root.title(f"OpenAuth ({time_remaining}s)")
