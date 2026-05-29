@@ -1,72 +1,11 @@
 import sys
-import tkinter as tk
-from tkinter import ttk
-import tkinter.messagebox as messagebox
-import time
-import json
 import os
-import secrets
-import subprocess
-import webbrowser
-import ctypes
-import winreg 
-import threading
-import urllib.request
-import urllib.error
-import re
-import datetime 
-import shutil 
-import socket
-import struct
-import random
-from PIL import Image, ImageDraw, ImageTk
-from core import StandardAuthAccount
-from plugin_manager import PluginManager
+import datetime
 
-# --- Core Plugins ---
-from plugins.qr_scanner import ScreenQRScannerPlugin
-from plugins.manual_entry import ManualEntryPlugin
-from plugins.tray_icon import TrayIconPlugin
-from plugins.tutorial import TutorialPlugin
-
-# --- Toggleable Plugins ---
-from plugins.backup_export import BackupExportPlugin  
-from plugins.secure_storage import SecureStoragePlugin
-from plugins.broadcaster import LocalBroadcasterPlugin
-from plugins.auto_login import AutoLoginPlugin
-from plugins.virtual_yubikey import VirtualYubiKeyPlugin
-from plugins.tailscale_sync import TailscaleSyncPlugin
-
-APP_VERSION = "v0.1.8.1"
-GITHUB_REPO = "cookietank/OpenAuth"
-
+# --- CRITICAL FIX: MOVE LOGGER TO THE ABSOLUTE TOP ---
+# This ensures even if an 'import' fails, it is caught in the log file!
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
-
-if "--uninstall" in sys.argv:
-    if IS_WIN:
-        try:
-            import keyring
-            keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
-        except Exception: pass
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
-            winreg.DeleteValue(key, "OpenAuth")
-            winreg.CloseKey(key)
-        except Exception: pass
-        vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
-        if os.path.exists(vbs_path):
-            try: os.remove(vbs_path)
-            except: pass
-
-    appdata_dir = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth') if IS_WIN else os.path.expanduser('~/Library/Application Support/OpenAuth')
-    if os.path.exists(appdata_dir):
-        shutil.rmtree(appdata_dir, ignore_errors=True)
-
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
-    sys.exit(0)
 
 if IS_WIN:
     APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
@@ -78,7 +17,6 @@ else:
 if not os.path.exists(APPDATA_DIR):
     os.makedirs(APPDATA_DIR)
 
-CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
 LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
 class SafeLogger:
@@ -104,16 +42,86 @@ class SafeLogger:
             try: self.log.flush()
             except: pass
 
-    def close(self):
-        if self.log:
-            try: self.log.close()
-            except: pass
+APP_VERSION = "v0.1.8.2"
 
 with open(LOG_FILE, 'a', encoding='utf-8') as f:
     f.write(f"\n\n[{datetime.datetime.now()}] === NEW OPENAUTH SESSION ({APP_VERSION}) ===\n")
 
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
+
+# --- NOW WE CAN SAFELY IMPORT EVERYTHING ELSE ---
+import tkinter as tk
+from tkinter import ttk
+import tkinter.messagebox as messagebox
+import time
+import json
+import secrets
+import subprocess
+import webbrowser
+import ctypes
+import winreg 
+import threading
+import urllib.request
+import urllib.error
+import re
+import shutil 
+import socket
+import struct
+import random
+from PIL import Image, ImageDraw, ImageTk
+
+from core import StandardAuthAccount
+from plugin_manager import PluginManager
+
+# --- Core Plugins ---
+from plugins.qr_scanner import ScreenQRScannerPlugin
+from plugins.manual_entry import ManualEntryPlugin
+from plugins.tray_icon import TrayIconPlugin
+from plugins.tutorial import TutorialPlugin
+
+# --- Toggleable Plugins ---
+from plugins.backup_export import BackupExportPlugin  
+from plugins.secure_storage import SecureStoragePlugin
+from plugins.broadcaster import LocalBroadcasterPlugin
+from plugins.auto_login import AutoLoginPlugin
+from plugins.virtual_yubikey import VirtualYubiKeyPlugin
+from plugins.tailscale_sync import TailscaleSyncPlugin
+
+GITHUB_REPO = "cookietank/OpenAuth"
+CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
+
+# =========================================================================
+# SILENT COMMAND-LINE UNINSTALLER
+# =========================================================================
+if "--uninstall" in sys.argv:
+    if IS_WIN:
+        try:
+            import keyring
+            keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
+        except Exception: pass
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+            winreg.DeleteValue(key, "OpenAuth")
+            winreg.CloseKey(key)
+        except Exception: pass
+        vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+        if os.path.exists(vbs_path):
+            try: os.remove(vbs_path)
+            except: pass
+
+    if os.path.exists(APPDATA_DIR):
+        shutil.rmtree(APPDATA_DIR, ignore_errors=True)
+
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
+    sys.exit(0)
+
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
@@ -185,6 +193,7 @@ class DesktopAuthenticator:
             "show_tutorial": True,
             "auto_update": True,
             "start_on_boot": False,
+            "understood_tray": False,
             "privacy_mode": False, 
             "theme": "Automatic",  
             "plugins": {
@@ -231,6 +240,7 @@ class DesktopAuthenticator:
         self.main_frame = tk.Frame(root, bg=self.colors['bg'])
         self.main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        # Pre-warm macOS network proxies on the main thread to prevent background thread crashes
         if IS_MAC:
             try: urllib.request.getproxies()
             except: pass
@@ -530,6 +540,7 @@ class DesktopAuthenticator:
                     self.config["show_tutorial"] = saved_config.get("show_tutorial", True)
                     self.config["auto_update"] = saved_config.get("auto_update", True)
                     self.config["start_on_boot"] = saved_config.get("start_on_boot", False)
+                    self.config["understood_tray"] = saved_config.get("understood_tray", False)
                     self.config["privacy_mode"] = saved_config.get("privacy_mode", False)
                     self.config["theme"] = saved_config.get("theme", "Automatic")
                     
@@ -832,7 +843,6 @@ class DesktopAuthenticator:
                 self.save_config()
                 
                 self.apply_theme_colors()
-                # Explicitly redraw the UI to update the privacy mode dots instantly!
                 self.refresh_ui()
                 self.plugin_manager.broadcast('config_updated')
                 
@@ -1037,14 +1047,6 @@ if __name__ == "__main__":
         mutex_name = "OpenAuth_Single_Instance_Mutex"
         mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if ctypes.windll.kernel32.GetLastError() == 183: 
-            sys.exit(0)
-    elif IS_MAC:
-        import socket
-        try:
-            lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            lock_socket.bind(("127.0.0.1", 50052)) 
-        except socket.error:
-            print("OpenAuth is already running.")
             sys.exit(0)
 
     root = tk.Tk()
