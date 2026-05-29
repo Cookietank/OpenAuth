@@ -44,11 +44,18 @@ OpenAuth requires **no complicated installation**. Just download the file for yo
 1. Click the macOS download button above and download the latest **`OpenAuth_vX.X.X_macOS.dmg`** file.
 2. Double-click the downloaded `.dmg` file to open it.
 3. Drag the **OpenAuth** shield icon into the **Applications** folder right next to it.
-4. Open your Mac's Applications folder and find OpenAuth.
+4. Open your Mac's Applications folder and double-click OpenAuth. 
 
 > 🛑 **"Developer cannot be verified" Popup?**
-> Apple has strict security for apps not downloaded from the App Store. If you double-click the app normally, Apple will block it from opening.
-> * **The Fix:** Hold the `Control` key on your keyboard and click the OpenAuth app (or just **Right-Click** it), then select **Open** from the menu. When the warning pops up, click the **Open** button. *(You only have to do this trick on the very first launch!)*
+> Apple has strict security for apps not downloaded directly from the Mac App Store. When you try to open it the first time, macOS will block it. Here is how to allow it in 10 seconds:
+> 
+> 1. On the popup warning, click **Done** (or **Cancel**).
+> 2. Open your Mac's **System Settings** (the gear icon) and click **Privacy & Security** on the left menu.
+> 3. Scroll down until you see the *Security* section. You will see a message saying OpenAuth was blocked.
+> 4. Click the **Open Anyway** button next to that message. 
+> 5. Use your Touch ID or Mac password to confirm, and click **Open** on the final popup! 
+> 
+> *(Note: You only have to do this once! After this, it will open normally forever).*
 
 ---
 
