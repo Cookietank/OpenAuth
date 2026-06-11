@@ -27,11 +27,6 @@ class VirtualYubiKeyPlugin(PluginBase):
         new_hotkey = self.app.config.get("hotkeys", {}).get("Copy Code to Clipboard", "")
         self.bind_native_hotkey(new_hotkey, self.execute_hotkey_action)
 
-    def copy_to_clipboard(self, text):
-        self.app.root.clipboard_clear()
-        self.app.root.clipboard_append(text)
-        self.app.root.update()
-
     def execute_hotkey_action(self):
         if not self.app.accounts:
             self.app.root.after(0, self.app.show_toast, "No accounts provisioned!")
@@ -41,14 +36,14 @@ class VirtualYubiKeyPlugin(PluginBase):
         rem_time = primary_acc.get_time_remaining()
         
         if rem_time <= 3:
-            self.app.root.after(0, self.app.show_toast, f"Code expiring in {rem_time}s!\nWaiting for next code...")
+            self.app.root.after(0, self.app.show_toast, f"Code expiring in {rem_time}s!\nWaiting for next code...", 3000)
             threading.Thread(target=self._wait_and_copy_next, args=(primary_acc, rem_time), daemon=True).start()
         else:
             code = primary_acc.get_current_code()
             self._process_code(code, rem_time)
 
     def _process_code(self, code, rem_time):
-        self.app.root.after(0, self.copy_to_clipboard, code)
+        self.app.root.after(0, lambda: self.app.copy_to_clipboard(code))
         auto_paste = self.app.config.get("hotkeys", {}).get("auto_paste", False)
         
         if auto_paste:
@@ -61,12 +56,11 @@ class VirtualYubiKeyPlugin(PluginBase):
                     script = f"""osascript -e 'tell application "System Events"' -e 'keystroke "{safe_code}"' -e 'key code 36' -e 'end tell'"""
                     os.system(script)
                     
-                self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}")
+                self.app.root.after(0, self.app.show_toast, f"Code Pasted: {code}\n(Valid for {rem_time}s)")
             except Exception as e:
-                print(f"[YUBIKEY ERROR] Paste failed: {e}")
                 self.app.root.after(0, self.app.show_toast, f"Paste failed: {e}")
         else:
-            self.app.root.after(0, self.app.show_toast, f"Code Copied: {code}")
+            self.app.root.after(0, self.app.show_toast, f"Copied: {code} (Disappears in 10s)")
 
     def _wait_and_copy_next(self, primary_acc, wait_time):
         time.sleep(wait_time + 0.2)

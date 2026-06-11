@@ -1,0 +1,2 @@
+### What's New in v0.1.6.1 
+- copying code to cliboard no longer overwrites the previous content of the clipboard by temporarily saving the previous contents and recopying

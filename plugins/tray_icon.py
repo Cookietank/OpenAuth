@@ -132,12 +132,9 @@ class TrayIconPlugin(PluginBase):
     def copy_from_tray(self, icon=None, item=None):
         if self.app.accounts:
             code = self.app.accounts[0].get_current_code()
-            def safe_copy():
-                self.app.root.clipboard_clear()
-                self.app.root.clipboard_append(code)
-                self.app.root.update()
-            self.app.root.after(0, safe_copy)
-            self.app.root.after(0, lambda: self.app.show_toast(f"Code copied: {code}"))
+            # Use the new ephemeral clipboard from app.py
+            self.app.root.after(0, lambda: self.app.copy_to_clipboard(code))
+            self.app.root.after(0, lambda: self.app.show_toast(f"Copied: {code} (Disappears in 10s)"))
 
     def restore_from_tray(self, icon=None, item=None):
         print("[TRAY DIAGNOSTIC] Restoring application...")
@@ -150,9 +147,7 @@ class TrayIconPlugin(PluginBase):
                     self.status_item = None
                 
                 AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
-                AppKit.NSApp.activateIgnoringOtherApps_(True)
                 
-                # THE SLEDGEHAMMER IS BACK: Force macOS to bring the window to the absolute front
                 os.system(f"osascript -e 'tell application \"System Events\" to set frontmost of the first process whose unix id is {os.getpid()} to true'")
             except Exception as e:
                 print(f"[TRAY ERROR] Failed to restore from Mac App Bar: {e}")
@@ -161,7 +156,7 @@ class TrayIconPlugin(PluginBase):
         self.app.root.update()
         self.app.resize_main_window()
         self.app.root.lift()
-        self.app.root.focus_force() # Force Tkinter to grab UI focus natively
+        self.app.root.focus_force() 
         print("[TRAY DIAGNOSTIC] Application restored successfully.")
 
     def quit_from_tray(self, icon=None, item=None):

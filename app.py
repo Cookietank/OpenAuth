@@ -1,9 +1,72 @@
 import sys
+import tkinter as tk
+from tkinter import ttk
+import tkinter.messagebox as messagebox
+import time
+import json
 import os
-import datetime
+import secrets
+import subprocess
+import webbrowser
+import ctypes
+import winreg 
+import threading
+import urllib.request
+import urllib.error
+import re
+import datetime 
+import shutil 
+import socket
+import struct
+import random
+from PIL import Image, ImageDraw, ImageTk
+from core import StandardAuthAccount
+from plugin_manager import PluginManager
+
+# --- Core Plugins ---
+from plugins.qr_scanner import ScreenQRScannerPlugin
+from plugins.manual_entry import ManualEntryPlugin
+from plugins.tray_icon import TrayIconPlugin
+from plugins.tutorial import TutorialPlugin
+
+# --- Toggleable Plugins ---
+from plugins.backup_export import BackupExportPlugin  
+from plugins.secure_storage import SecureStoragePlugin
+from plugins.broadcaster import LocalBroadcasterPlugin
+from plugins.auto_login import AutoLoginPlugin
+from plugins.virtual_yubikey import VirtualYubiKeyPlugin
+from plugins.tailscale_sync import TailscaleSyncPlugin
+
+APP_VERSION = "v0.1.6.1"
+GITHUB_REPO = "cookietank/OpenAuth"
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
+
+if "--uninstall" in sys.argv:
+    if IS_WIN:
+        try:
+            import keyring
+            keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
+        except Exception: pass
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+            winreg.DeleteValue(key, "OpenAuth")
+            winreg.CloseKey(key)
+        except Exception: pass
+        vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
+        if os.path.exists(vbs_path):
+            try: os.remove(vbs_path)
+            except: pass
+
+    appdata_dir = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth') if IS_WIN else os.path.expanduser('~/Library/Application Support/OpenAuth')
+    if os.path.exists(appdata_dir):
+        shutil.rmtree(appdata_dir, ignore_errors=True)
+
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
+    sys.exit(0)
 
 if IS_WIN:
     APPDATA_DIR = os.path.join(os.getenv('APPDATA', ''), 'OpenAuth')
@@ -15,6 +78,7 @@ else:
 if not os.path.exists(APPDATA_DIR):
     os.makedirs(APPDATA_DIR)
 
+CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
 LOG_FILE = os.path.join(APPDATA_DIR, "openauth.log")
 
 class SafeLogger:
@@ -45,89 +109,11 @@ class SafeLogger:
             try: self.log.close()
             except: pass
 
-APP_VERSION = "v0.1.6.0"
-
 with open(LOG_FILE, 'a', encoding='utf-8') as f:
     f.write(f"\n\n[{datetime.datetime.now()}] === NEW OPENAUTH SESSION ({APP_VERSION}) ===\n")
 
 sys.stdout = SafeLogger(LOG_FILE, is_stdout=True)
 sys.stderr = SafeLogger(LOG_FILE, is_stdout=False)
-
-# --- PROTECTED OS IMPORTS ---
-if IS_WIN:
-    import ctypes
-    import winreg
-
-# --- STANDARD IMPORTS ---
-import tkinter as tk
-from tkinter import ttk
-import tkinter.messagebox as messagebox
-import time
-import json
-import secrets
-import subprocess
-import webbrowser
-import threading
-import urllib.request
-import urllib.error
-import re
-import shutil 
-import socket
-import struct
-import random
-from PIL import Image, ImageDraw, ImageTk
-
-from core import StandardAuthAccount
-from plugin_manager import PluginManager
-
-# --- Core Plugins ---
-from plugins.qr_scanner import ScreenQRScannerPlugin
-from plugins.manual_entry import ManualEntryPlugin
-from plugins.tray_icon import TrayIconPlugin
-from plugins.tutorial import TutorialPlugin
-
-# --- Toggleable Plugins ---
-from plugins.backup_export import BackupExportPlugin  
-from plugins.secure_storage import SecureStoragePlugin
-from plugins.broadcaster import LocalBroadcasterPlugin
-from plugins.auto_login import AutoLoginPlugin
-from plugins.virtual_yubikey import VirtualYubiKeyPlugin
-from plugins.tailscale_sync import TailscaleSyncPlugin
-
-GITHUB_REPO = "cookietank/OpenAuth"
-CONFIG_FILE = os.path.join(APPDATA_DIR, "app_config.json")
-
-# =========================================================================
-# SILENT COMMAND-LINE UNINSTALLER
-# =========================================================================
-if "--uninstall" in sys.argv:
-    if IS_WIN:
-        try:
-            import keyring
-            keyring.delete_password("ModularDesktopAuthenticator", "TOTP_Secrets")
-        except Exception: pass
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
-            winreg.DeleteValue(key, "OpenAuth")
-            winreg.CloseKey(key)
-        except Exception: pass
-        vbs_path = os.path.join(os.getenv('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup\OpenAuth.vbs')
-        if os.path.exists(vbs_path):
-            try: os.remove(vbs_path)
-            except: pass
-
-    if os.path.exists(APPDATA_DIR):
-        shutil.rmtree(APPDATA_DIR, ignore_errors=True)
-
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showinfo("Uninstall Complete", "OpenAuth has been completely removed from your system.\n\nYou can now safely delete the executable.")
-    sys.exit(0)
-
-def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
 
 CORE_PLUGINS = {
     "Tray Icon": TrayIconPlugin,
@@ -185,6 +171,10 @@ class DesktopAuthenticator:
         self.root.minsize(400, 150)
         self.root.attributes("-topmost", True)
         self.settings_window = None 
+        
+        # Ephemeral Clipboard Trackers
+        self._clipboard_timer_id = None
+        self._original_clipboard = None
         
         if "--tray" in sys.argv:
             self.root.withdraw()
@@ -270,6 +260,45 @@ class DesktopAuthenticator:
             threading.Thread(target=self.check_for_updates, daemon=True).start()
 
         threading.Thread(target=self.check_time_drift, daemon=True).start()
+
+    # =========================================================================
+    # EPHEMERAL CLIPBOARD ENGINE
+    # =========================================================================
+    def copy_to_clipboard(self, text, revert_after_seconds=10):
+        """Copies text, then securely reverts to the previous clipboard state after X seconds."""
+        try:
+            current_clip = self.root.clipboard_get()
+            # Don't backup if there's already an active timer running
+            if not self._clipboard_timer_id:
+                self._original_clipboard = current_clip
+        except Exception:
+            if not self._clipboard_timer_id:
+                self._original_clipboard = None
+                
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update()
+        
+        # Cancel any existing restore timer and start a fresh 10s countdown
+        if self._clipboard_timer_id:
+            self.root.after_cancel(self._clipboard_timer_id)
+            
+        def restore():
+            try:
+                # Only restore if the user hasn't actively copied something else!
+                if self.root.clipboard_get() == text:
+                    self.root.clipboard_clear()
+                    if self._original_clipboard:
+                        self.root.clipboard_append(self._original_clipboard)
+                    self.root.update()
+            except Exception:
+                pass
+            self._clipboard_timer_id = None
+            self._original_clipboard = None
+
+        self._clipboard_timer_id = self.root.after(revert_after_seconds * 1000, restore)
+
+    # =========================================================================
 
     def get_os_theme(self):
         if IS_WIN:
@@ -968,10 +997,8 @@ class DesktopAuthenticator:
             
             def copy_code_from_click(event, a=acc):
                 code = a.get_current_code()
-                self.root.clipboard_clear()
-                self.root.clipboard_append(code)
-                self.root.update()
-                self.show_toast(f"Copied to clipboard: {code}")
+                self.copy_to_clipboard(code)
+                self.show_toast(f"Copied: {code} (Disappears in 10s)")
 
             code_label.bind("<Button-1>", copy_code_from_click)
             
@@ -1050,6 +1077,14 @@ if __name__ == "__main__":
         mutex_name = "OpenAuth_Single_Instance_Mutex"
         mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if ctypes.windll.kernel32.GetLastError() == 183: 
+            sys.exit(0)
+    elif IS_MAC:
+        import socket
+        try:
+            lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            lock_socket.bind(("127.0.0.1", 50052)) 
+        except socket.error:
+            print("OpenAuth is already running.")
             sys.exit(0)
 
     root = tk.Tk()

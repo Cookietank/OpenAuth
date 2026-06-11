@@ -32,11 +32,6 @@ class AutoLoginPlugin(PluginBase):
             return self.app.accounts[0].get_current_code()
         return None
 
-    def copy_to_clipboard(self, text):
-        self.app.root.clipboard_clear()
-        self.app.root.clipboard_append(text)
-        self.app.root.update()
-
     def execute_automation(self):
         print("\n[AUTO-LOGIN] Sequence Initiated via Native Keystrokes!")
         self.app.root.after(0, self.app.show_toast, "Triggering Microsoft Auto Login")
@@ -81,7 +76,8 @@ class AutoLoginPlugin(PluginBase):
             code = self.get_target_code()
             if code:
                 print(f"[AUTO-LOGIN] Copying code: {code}")
-                self.app.root.after(0, self.copy_to_clipboard, code)
+                # Use ephemeral clipboard
+                self.app.root.after(0, lambda: self.app.copy_to_clipboard(code))
             else:
                 print("[AUTO-LOGIN] No code available to copy!")
                 self.app.root.after(0, self.app.show_toast, "Error: No Primary Code available!")
